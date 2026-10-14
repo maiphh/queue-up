@@ -18,6 +18,32 @@ pnpm test
 pnpm dev
 ```
 
+### Local API + mock data
+
+```bash
+# Apply schema + seed into local D1 (first time or full reset)
+pnpm --filter api-worker db:reset
+
+# Re-seed only (keeps schema; clears/reinserts mock rows)
+pnpm --filter api-worker db:seed
+
+# Start worker (default http://127.0.0.1:8787)
+pnpm --filter api-worker dev
+```
+
+**Seeded demo IDs**
+
+| Entity | ID / token |
+| :--- | :--- |
+| Phở 24 branch | `branch-pho-d1` |
+| QR deep-link | `qr-pho-nguyen-hue` |
+| Cafe branch | `branch-cafe-d3` / `qr-cafe-d3` |
+| Clinic branch | `branch-clinic-tb` / `qr-clinic-tb` |
+| Host POS | `/host/branch-pho-d1` |
+| TV kiosk | `/tv/pho-24` (slug = merchant slug) |
+
+Mock set includes merchants (PRO restaurant, FREE cafe, PRO clinic), buckets, live WAITING/CALLED tickets, staff users, and a sample wallet ledger.
+
 ## Workspace
 
 - `apps/api-worker` — Cloudflare Worker API

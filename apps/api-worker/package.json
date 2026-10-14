@@ -9,7 +9,10 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint src test --ext .ts",
     "test": "vitest run && vitest run --config vitest.do.config.ts",
-    "test:do": "vitest run --config vitest.do.config.ts"
+    "test:do": "vitest run --config vitest.do.config.ts",
+    "db:schema": "wrangler d1 execute luotdi-db --local --file=src/db/schema.sql",
+    "db:seed": "wrangler d1 execute luotdi-db --local --file=src/db/seed.sql",
+    "db:reset": "node ./scripts/reset-local-d1.mjs"
   },
   "dependencies": {
     "@luotdi/shared": "workspace:*",
