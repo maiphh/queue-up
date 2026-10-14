@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    "types": [
+      "@cloudflare/workers-types",
+      "@cloudflare/vitest-pool-workers"
+    ],
+    "noEmit": true,
+    "jsx": "react-jsx"
+  },
+  "include": ["src", "test", "worker-configuration.d.ts"],
+  "exclude": ["vitest.config.ts", "dist", "node_modules"]
+}
