@@ -20,15 +20,24 @@ pnpm dev
 
 ### Local API + mock data
 
+The Zalo Mini App and Merchant PWA call `/api/*` on their Vite origin. Vite proxies those requests to the worker at `http://127.0.0.1:8787`. You need **both** the worker and the UI running, with D1 seeded.
+
 ```bash
 # Apply schema + seed into local D1 (first time or full reset)
+# If EPERM: stop wrangler/workerd first, or use db:seed only
 pnpm --filter api-worker db:reset
 
-# Re-seed only (keeps schema; clears/reinserts mock rows)
+# Re-seed only (keeps schema; clears/reinserts mock rows) — safe while worker is stopped
 pnpm --filter api-worker db:seed
 
-# Start worker (default http://127.0.0.1:8787)
+# Terminal 1 — worker
 pnpm --filter api-worker dev
+
+# Terminal 2 — merchant PWA (http://127.0.0.1:5173)
+pnpm --filter merchant-web dev
+
+# Terminal 3 — Zalo mini app (http://127.0.0.1:5174)
+pnpm --filter zalo-mini-app dev
 ```
 
 **Seeded demo IDs**

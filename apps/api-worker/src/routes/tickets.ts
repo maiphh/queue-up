@@ -80,6 +80,90 @@ function toBucket(row: BucketRow): Bucket {
 
 const tickets = new Hono<{ Bindings: Env }>();
 
+/** GET /api/tickets/:id — live pass screen */
+tickets.get('/:id', async (c) => {
+  const id = c.req.param('id');
+  const row = await c.env.DB.prepare(
+    `SELECT t.id, t.display_number, t.status, t.branch_id, t.bucket_id,
+            t.pax_count, t.created_at, t.priority_boost,
+            b.name AS branch_name,
+            bk.active_counters, bk.rolling_turnover_mins
+     FROM tickets t
+     JOIN branches b ON b.id = t.branch_id
+     JOIN queue_buckets bk ON bk.id = t.bucket_id
+     WHERE t.id = ?1`,
+  )
+    .bind(id)
+    .first<{
+      id: string;
+      display_number: string;
+      status: string;
+      branch_id: string;
+      bucket_id: string;
+      pax_count: number;
+      created_at: number;
+      priority_boost: number;
+      branch_name: string;
+      active_counters: number;
+      rolling_turnover_mins: number;
+    }>();
+
+  if (!row) {
+    return c.json(apiError('Ticket not found', 'TICKET_NOT_FOUND'), 404);
+  }
+
+  const aheadRow = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS c FROM tickets
+     WHERE branch_id = ?1 AND bucket_id = ?2 AND status = 'WAITING'
+       AND (
+         priority_boost > ?3
+         OR (priority_boost = ?3 AND created_at < ?4)
+         OR (priority_boost = ?3 AND created_at = ?4 AND id < ?5)
+       )`,
+  )
+    .bind(
+      row.branch_id,
+      row.bucket_id,
+      row.priority_boost,
+      row.created_at,
+      row.id,
+    )
+    .first<{ c: number }>();
+
+  const partiesAhead =
+    row.status === 'WAITING' ? (aheadRow?.c ?? 0) : 0;
+
+  const nowServingRow = await c.env.DB.prepare(
+    `SELECT display_number FROM tickets
+     WHERE branch_id = ?1 AND bucket_id = ?2 AND status = 'CALLED'
+     ORDER BY called_at DESC LIMIT 1`,
+  )
+    .bind(row.branch_id, row.bucket_id)
+    .first<{ display_number: string }>();
+
+  const estimatedWaitMins =
+    row.status === 'WAITING'
+      ? calculateEstimatedWait({
+          partiesAheadInBucket: partiesAhead,
+          activeCountersInBucket: Math.max(1, row.active_counters),
+          rollingTurnoverMins: row.rolling_turnover_mins,
+        })
+      : 0;
+
+  return c.json({
+    id: row.id,
+    displayNumber: row.display_number,
+    status: row.status,
+    branchId: row.branch_id,
+    branchName: row.branch_name,
+    bucketId: row.bucket_id,
+    paxCount: row.pax_count,
+    nowServing: nowServingRow?.display_number ?? '—',
+    partiesAhead,
+    estimatedWaitMins,
+  });
+});
+
 tickets.post('/', async (c) => {
   let body: unknown;
   try {

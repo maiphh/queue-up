@@ -18,6 +18,8 @@ type MarketplaceBranch = {
   category: string;
   waitingCount: number;
   district: string;
+  /** QR token for `/b/:qrToken` check-in deep link */
+  qrToken?: string;
 };
 
 type CategoryFilter = 'ALL' | 'RESTAURANT' | 'CLINIC' | 'CAFE';
@@ -116,7 +118,7 @@ export function MarketplacePage() {
                 </div>
               </div>
               <Link
-                to={`/b/${branch.id}`}
+                to={`/b/${branch.qrToken ?? branch.id}`}
                 className="mt-2 inline-block font-mono text-[10px] uppercase tracking-widest text-carbon underline"
               >
                 OPEN
