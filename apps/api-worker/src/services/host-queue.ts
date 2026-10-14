@@ -6,6 +6,7 @@ import {
   type HostTicketActionResponse,
   type TicketStatus,
 } from '@luotdi/shared';
+import { ZnsDispatcherService } from './zns-dispatcher';
 
 type TicketRow = {
   id: string;
@@ -225,6 +226,13 @@ export class HostQueueService {
     }
 
     await this.db.batch(statements);
+
+    // ApproachingTurn ZNS (prepaid wallet). Failures must not fail SEAT.
+    try {
+      await new ZnsDispatcherService(this.db).onTicketSeated(ticket.id);
+    } catch {
+      /* wallet/ZNS side-effects are best-effort */
+    }
 
     return {
       ok: true,

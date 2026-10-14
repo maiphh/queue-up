@@ -1,8 +1,6 @@
 /**
  * Prepaid ZNS "approaching turn" dispatcher (Phase 2.2).
  *
- * RED stub — GREEN implements atomic wallet check-and-deduct + ZNS send.
- *
  * Contract for `onTicketSeated(seatedTicketId)`:
  * 1. Load the seated ticket's branch/bucket; list WAITING tickets in that
  *    bucket ordered by `(priority_boost DESC, created_at ASC)`.
@@ -19,34 +17,210 @@
  *    WebSocket-only fallback is out of scope for this service.
  */
 
-import type { ApproachingTurnResult, ZnsApproachingDispatch } from '@luotdi/shared';
+import {
+  ZNS_APPROACHING_FEE_VND,
+  znsApproachingIdempotencyKey,
+  type ApproachingTurnResult,
+  type ZnsApproachingDispatch,
+} from '@luotdi/shared';
 
 export type ZnsSender = {
   sendApproachingTurn(payload: ZnsApproachingDispatch): Promise<void>;
+};
+
+type TicketContext = {
+  id: string;
+  branch_id: string;
+  bucket_id: string;
+  display_number: string;
+  merchant_id: string;
 };
 
 export class ZnsDispatcherService {
   constructor(
     private readonly db: D1Database,
     private readonly sender?: ZnsSender,
-  ) {
-    void this.db;
-    void this.sender;
-  }
+  ) {}
 
   /**
    * After a ticket is SEATED, notify the WAITING ticket now 2 spots away
    * (same bucket), with prepaid wallet debit + idempotent ledger.
    */
-  async onTicketSeated(_seatedTicketId: string): Promise<ApproachingTurnResult> {
-    throw new Error('Not implemented');
+  async onTicketSeated(seatedTicketId: string): Promise<ApproachingTurnResult> {
+    const seated = await this.db
+      .prepare(
+        `SELECT id, branch_id, bucket_id FROM tickets WHERE id = ?`,
+      )
+      .bind(seatedTicketId)
+      .first<{ id: string; branch_id: string; bucket_id: string }>();
+
+    if (!seated) {
+      return {
+        notifiedTicketId: null,
+        charged: false,
+        skippedReason: 'NO_CANDIDATE',
+      };
+    }
+
+    const waiting = await this.db
+      .prepare(
+        `SELECT id FROM tickets
+         WHERE branch_id = ? AND bucket_id = ? AND status = 'WAITING'
+         ORDER BY priority_boost DESC, created_at ASC`,
+      )
+      .bind(seated.branch_id, seated.bucket_id)
+      .all<{ id: string }>();
+
+    const candidate = waiting.results?.[2];
+    if (!candidate) {
+      return {
+        notifiedTicketId: null,
+        charged: false,
+        skippedReason: 'NO_CANDIDATE',
+      };
+    }
+
+    return this.notifyApproachingTurn(candidate.id);
   }
 
   /**
    * Direct ApproachingTurn for a known ticket (idempotent charge + ZNS).
    * Used by tests / re-evaluation paths (e.g. after BUMP_PRIORITY).
    */
-  async notifyApproachingTurn(_ticketId: string): Promise<ApproachingTurnResult> {
-    throw new Error('Not implemented');
+  async notifyApproachingTurn(ticketId: string): Promise<ApproachingTurnResult> {
+    const ticket = await this.loadTicketContext(ticketId);
+    if (!ticket) {
+      return {
+        notifiedTicketId: null,
+        charged: false,
+        skippedReason: 'NO_CANDIDATE',
+      };
+    }
+
+    const referenceCode = znsApproachingIdempotencyKey(ticket.id);
+
+    const existing = await this.db
+      .prepare(
+        `SELECT id FROM wallet_ledger WHERE reference_code = ? LIMIT 1`,
+      )
+      .bind(referenceCode)
+      .first<{ id: string }>();
+
+    if (existing) {
+      return {
+        notifiedTicketId: ticket.id,
+        charged: false,
+        skippedReason: 'ALREADY_SENT',
+      };
+    }
+
+    const merchant = await this.db
+      .prepare(
+        `SELECT wallet_balance_vnd AS balance FROM merchants WHERE id = ?`,
+      )
+      .bind(ticket.merchant_id)
+      .first<{ balance: number }>();
+
+    if (!merchant || merchant.balance < ZNS_APPROACHING_FEE_VND) {
+      return {
+        notifiedTicketId: ticket.id,
+        charged: false,
+        skippedReason: 'INSUFFICIENT_WALLET',
+      };
+    }
+
+    const ledgerId = crypto.randomUUID();
+    const createdAt = Date.now();
+
+    // Atomic wallet decrement + ledger insert. Conditional UPDATE prevents
+    // debit below fee; if changes=0 we remove any orphan ledger row.
+    const batchResults = await this.db.batch([
+      this.db
+        .prepare(
+          `UPDATE merchants
+           SET wallet_balance_vnd = wallet_balance_vnd - ?
+           WHERE id = ? AND wallet_balance_vnd >= ?`,
+        )
+        .bind(
+          ZNS_APPROACHING_FEE_VND,
+          ticket.merchant_id,
+          ZNS_APPROACHING_FEE_VND,
+        ),
+      this.db
+        .prepare(
+          `INSERT INTO wallet_ledger (
+             id, merchant_id, ticket_id, amount_vnd, tx_type, reference_code, created_at
+           ) VALUES (?, ?, ?, ?, 'ZNS_CALL_ALERT', ?, ?)`,
+        )
+        .bind(
+          ledgerId,
+          ticket.merchant_id,
+          ticket.id,
+          -ZNS_APPROACHING_FEE_VND,
+          referenceCode,
+          createdAt,
+        ),
+    ]);
+
+    const walletUpdated = (batchResults[0]?.meta?.changes ?? 0) > 0;
+
+    if (!walletUpdated) {
+      await this.db
+        .prepare(`DELETE FROM wallet_ledger WHERE id = ?`)
+        .bind(ledgerId)
+        .run();
+
+      const raced = await this.db
+        .prepare(
+          `SELECT id FROM wallet_ledger WHERE reference_code = ? LIMIT 1`,
+        )
+        .bind(referenceCode)
+        .first<{ id: string }>();
+
+      if (raced) {
+        return {
+          notifiedTicketId: ticket.id,
+          charged: false,
+          skippedReason: 'ALREADY_SENT',
+        };
+      }
+
+      return {
+        notifiedTicketId: ticket.id,
+        charged: false,
+        skippedReason: 'INSUFFICIENT_WALLET',
+      };
+    }
+
+    if (this.sender) {
+      const payload: ZnsApproachingDispatch = {
+        template: 'APPROACHING_TURN',
+        merchantId: ticket.merchant_id,
+        ticketId: ticket.id,
+        displayNumber: ticket.display_number,
+        partiesAhead: 2,
+        at: createdAt,
+      };
+      await this.sender.sendApproachingTurn(payload);
+    }
+
+    return {
+      notifiedTicketId: ticket.id,
+      charged: true,
+    };
+  }
+
+  private async loadTicketContext(
+    ticketId: string,
+  ): Promise<TicketContext | null> {
+    return this.db
+      .prepare(
+        `SELECT t.id, t.branch_id, t.bucket_id, t.display_number, b.merchant_id
+         FROM tickets t
+         JOIN branches b ON b.id = t.branch_id
+         WHERE t.id = ?`,
+      )
+      .bind(ticketId)
+      .first<TicketContext>();
   }
 }
