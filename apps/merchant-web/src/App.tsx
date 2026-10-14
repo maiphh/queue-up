@@ -1,5 +1,6 @@
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import { HostPosPage } from './modules/host-pos';
+import { TvKioskPage } from './modules/tv-kiosk';
 
 export function App() {
   return (
@@ -7,6 +8,7 @@ export function App() {
       <main className="min-h-screen bg-chassis text-carbon font-sans">
         <Routes>
           <Route path="/host/:branchId" element={<HostPosPage />} />
+          <Route path="/tv/:branchSlug" element={<TvKioskPage />} />
           <Route
             path="/"
             element={
