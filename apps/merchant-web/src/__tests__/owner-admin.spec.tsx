@@ -3,7 +3,7 @@
  * GREEN (AGENT-FRONTEND): implement OwnerAdminPage so these pass.
  */
 
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import {
@@ -156,14 +156,16 @@ describe('Owner Admin — dynamic bucket editor', () => {
       const row = within(editor).getByTestId(`bucket-row-${bucket.prefix}`);
       expect(within(row).getByDisplayValue(bucket.prefix)).toBeInTheDocument();
       expect(
-        within(row).getByDisplayValue(String(bucket.minPax)),
-      ).toBeInTheDocument();
+        (within(row).getByLabelText(/MIN\s*PAX/i) as HTMLInputElement).value,
+      ).toBe(String(bucket.minPax));
       expect(
-        within(row).getByDisplayValue(String(bucket.maxPax)),
-      ).toBeInTheDocument();
+        (within(row).getByLabelText(/MAX\s*PAX/i) as HTMLInputElement).value,
+      ).toBe(String(bucket.maxPax));
       expect(
-        within(row).getByDisplayValue(String(bucket.activeCounters)),
-      ).toBeInTheDocument();
+        (
+          within(row).getByLabelText(/ACTIVE\s*(COUNTERS|TABLES)/i) as HTMLInputElement
+        ).value,
+      ).toBe(String(bucket.activeCounters));
     }
   });
 
@@ -180,12 +182,13 @@ describe('Owner Admin — dynamic bucket editor', () => {
       /ACTIVE\s*(COUNTERS|TABLES)/i,
     );
 
-    await user.clear(minInput);
-    await user.type(minInput, '1');
-    await user.clear(maxInput);
-    await user.type(maxInput, '3');
-    await user.clear(countersInput);
-    await user.type(countersInput, '5');
+    fireEvent.change(minInput, { target: { value: '1' } });
+    fireEvent.change(maxInput, { target: { value: '3' } });
+    fireEvent.change(countersInput, { target: { value: '5' } });
+
+    expect((minInput as HTMLInputElement).value).toBe('1');
+    expect((maxInput as HTMLInputElement).value).toBe('3');
+    expect((countersInput as HTMLInputElement).value).toBe('5');
 
     await user.click(
       within(editor).getByRole('button', { name: /SAVE\s*BUCKETS/i }),

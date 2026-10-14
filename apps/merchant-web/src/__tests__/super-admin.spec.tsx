@@ -98,13 +98,17 @@ describe('Super-Admin — God Mode shell', () => {
     renderSuperAdmin();
 
     const panel = await screen.findByTestId('super-admin-panel');
-    expect(within(panel).getByText(/GOD\s*MODE|SUPER-?ADMIN/i)).toBeInTheDocument();
+    expect(within(panel).getByText(/GOD\s*MODE/i)).toBeInTheDocument();
+    expect(within(panel).getByText(/SUPER-?ADMIN/i)).toBeInTheDocument();
 
     const list = within(panel).getByTestId('branch-list');
     expect(within(list).getByText(/Pho 24 — Nguyen Hue/i)).toBeInTheDocument();
     expect(within(list).getByText(/Clinic Saigon — Lab/i)).toBeInTheDocument();
-    expect(within(list).getByText(/\bFREE\b/)).toBeInTheDocument();
-    expect(within(list).getByText(/\bPRO\b/)).toBeInTheDocument();
+
+    const rowFree = within(list).getByTestId('branch-row-branch-1');
+    const rowPro = within(list).getByTestId('branch-row-branch-2');
+    expect(within(rowFree).getByText(/^FREE$/)).toBeInTheDocument();
+    expect(within(rowPro).getByText(/^PRO$/)).toBeInTheDocument();
   });
 });
 

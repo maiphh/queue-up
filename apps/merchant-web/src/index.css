@@ -12,3 +12,21 @@ body {
   margin: 0;
   background-color: #e6e5e0;
 }
+
+@media print {
+  body {
+    background: #fff;
+  }
+
+  [data-page='owner-admin'] > :not([data-testid='qr-standee']) {
+    display: none !important;
+  }
+
+  [data-testid='qr-standee'] {
+    display: block !important;
+    margin: 0;
+    border: 0;
+    width: 148mm;
+    min-height: 210mm;
+  }
+}

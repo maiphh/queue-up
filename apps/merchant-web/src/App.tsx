@@ -1,5 +1,7 @@
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import { HostPosPage } from './modules/host-pos';
+import { OwnerAdminPage } from './modules/owner-admin';
+import { SuperAdminPage } from './modules/super-admin';
 import { TvKioskPage } from './modules/tv-kiosk';
 
 export function App() {
@@ -9,6 +11,9 @@ export function App() {
         <Routes>
           <Route path="/host/:branchId" element={<HostPosPage />} />
           <Route path="/tv/:branchSlug" element={<TvKioskPage />} />
+          <Route path="/admin" element={<OwnerAdminPage />} />
+          <Route path="/admin/:branchId" element={<OwnerAdminPage />} />
+          <Route path="/super-admin" element={<SuperAdminPage />} />
           <Route
             path="/"
             element={
@@ -23,7 +28,7 @@ export function App() {
                     01 / MERCHANT PWA SHELL
                   </p>
                   <p className="mt-2 text-sm">
-                    Host / TV / Owner / SuperAdmin scaffold
+                    Host / TV / Owner / SuperAdmin
                   </p>
                 </section>
               </>
