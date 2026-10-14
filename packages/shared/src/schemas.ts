@@ -152,3 +152,75 @@ export const HostTicketActionResponseSchema = z.object({
 export type HostTicketActionResponse = z.infer<
   typeof HostTicketActionResponseSchema
 >;
+
+// --- BranchQueueRoom WebSocket contracts (Phase 2.1) ---
+
+/** Client role on a branch live-queue socket. */
+export const WsClientRoleSchema = z.enum(['HOST', 'TV', 'CUSTOMER']);
+export type WsClientRole = z.infer<typeof WsClientRoleSchema>;
+
+/**
+ * First client → DO message after upgrade.
+ * CUSTOMER must include `ticketId` so the room can target YOUR_TURN_CALLED.
+ */
+export const WsClientHelloSchema = z
+  .object({
+    type: z.literal('HELLO'),
+    role: WsClientRoleSchema,
+    branchId: z.string().min(1),
+    ticketId: z.string().min(1).optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.role === 'CUSTOMER' && data.ticketId === undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'CUSTOMER hello requires ticketId',
+        path: ['ticketId'],
+      });
+    }
+  });
+export type WsClientHello = z.infer<typeof WsClientHelloSchema>;
+
+/** Fan-out to Host / TV / Customer after any queue mutation (e.g. SUMMON). */
+export const QueueUpdatedEventSchema = z.object({
+  type: z.literal('QUEUE_UPDATED'),
+  branchId: z.string().min(1),
+  ticketId: z.string().min(1),
+  displayNumber: z.string().min(1),
+  status: TicketStatusSchema,
+  at: z.number().int().positive(),
+});
+export type QueueUpdatedEvent = z.infer<typeof QueueUpdatedEventSchema>;
+
+/** Targeted to the CUSTOMER socket whose HELLO.ticketId matches. */
+export const YourTurnCalledEventSchema = z.object({
+  type: z.literal('YOUR_TURN_CALLED'),
+  branchId: z.string().min(1),
+  ticketId: z.string().min(1),
+  displayNumber: z.string().min(1),
+  at: z.number().int().positive(),
+});
+export type YourTurnCalledEvent = z.infer<typeof YourTurnCalledEventSchema>;
+
+export const WsServerEventSchema = z.discriminatedUnion('type', [
+  QueueUpdatedEventSchema,
+  YourTurnCalledEventSchema,
+]);
+export type WsServerEvent = z.infer<typeof WsServerEventSchema>;
+
+/**
+ * Worker → DO internal broadcast body (POST …/broadcast).
+ * GREEN: HostQueueService SUMMON (and later other actions) POSTs this to
+ * `BRANCH_QUEUE_ROOM.idFromName(branchId)` so connected sockets fan out.
+ */
+export const BranchQueueBroadcastRequestSchema = z.object({
+  type: z.literal('SUMMON'),
+  branchId: z.string().min(1),
+  ticketId: z.string().min(1),
+  displayNumber: z.string().min(1),
+  status: z.literal('CALLED'),
+  at: z.number().int().positive().optional(),
+});
+export type BranchQueueBroadcastRequest = z.infer<
+  typeof BranchQueueBroadcastRequestSchema
+>;

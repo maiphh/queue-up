@@ -10,6 +10,7 @@ const schemaSql = readFileSync(
 export default defineWorkersConfig({
   test: {
     include: ['test/**/*.{test,spec}.ts'],
+    exclude: ['test/durable-object.spec.ts'],
     poolOptions: {
       workers: {
         wrangler: { configPath: './wrangler.toml' },

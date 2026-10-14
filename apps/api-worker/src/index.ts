@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { BranchQueueRoom } from './do/BranchQueueRoom';
-import { host, tickets } from './routes';
+import { branches, host, tickets } from './routes';
 import { dailyResetCron, sweepExpiredHolds } from './services';
 
 export type Env = {
@@ -14,6 +14,7 @@ app.get('/health', (c) => c.json({ ok: true, service: 'luotdi-api' }));
 
 app.route('/api/tickets', tickets);
 app.route('/api/host', host);
+app.route('/api/branches', branches);
 
 app.all('*', (c) => c.json({ error: 'NOT_IMPLEMENTED' }, 501));
 
