@@ -103,7 +103,11 @@ export function HostPosPage() {
       try {
         await fetch(`/api/host/tickets/${ticketId}/action`, {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            // Local/dev staff auth until JWT lands
+            'X-Test-Staff-Role': 'BRANCH_HOST',
+          },
           body: JSON.stringify({ action, ...extra }),
         });
         setDrawerTicketId(null);
@@ -313,7 +317,7 @@ export function HostPosPage() {
               <KeycapButton
                 variant="secondary"
                 onClick={() =>
-                  void postTicketAction(drawerTicket.id, 'BUMP')
+                  void postTicketAction(drawerTicket.id, 'BUMP_PRIORITY')
                 }
               >
                 Bump Priority
@@ -321,7 +325,9 @@ export function HostPosPage() {
               <KeycapButton
                 variant="secondary"
                 onClick={() =>
-                  void postTicketAction(drawerTicket.id, 'CHANGE_PARTY_SIZE')
+                  void postTicketAction(drawerTicket.id, 'CHANGE_BUCKET', {
+                    paxCount: Math.min(12, drawerTicket.paxCount + 1),
+                  })
                 }
               >
                 Change Party Size
