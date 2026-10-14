@@ -37,7 +37,7 @@ host.patch('/tickets/:id/action', async (c) => {
   }
 
   const ticketId = c.req.param('id');
-  const service = new HostQueueService(c.env.DB);
+  const service = new HostQueueService(c.env.DB, c.env.BRANCH_QUEUE_ROOM);
   const result = await service.applyAction(ticketId, parsed.data);
 
   if (!result.ok) {

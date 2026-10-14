@@ -1,6 +1,7 @@
 import {
   InvalidTicketTransitionError,
   transitionTicket,
+  type BranchQueueBroadcastRequest,
   type HostTicketActionRequest,
   type HostTicketActionResponse,
   type TicketStatus,
@@ -61,7 +62,10 @@ function toResponse(row: TicketRow): HostTicketActionResponse {
 
 /** Host ad-hoc ticket mutations (SUMMON / HOLD / SEAT / BUMP / CHANGE_BUCKET / CANCEL). */
 export class HostQueueService {
-  constructor(private readonly db: D1Database) {}
+  constructor(
+    private readonly db: D1Database,
+    private readonly branchQueueRoom?: DurableObjectNamespace,
+  ) {}
 
   async applyAction(
     ticketId: string,
@@ -133,10 +137,37 @@ export class HostQueueService {
       .bind(calledAt, ticket.id)
       .run();
 
+    await this.notifyBranchRoom({
+      type: 'SUMMON',
+      branchId: ticket.branch_id,
+      ticketId: ticket.id,
+      displayNumber: ticket.display_number,
+      status: 'CALLED',
+      at: calledAt,
+    });
+
     return {
       ok: true,
       data: toResponse({ ...ticket, status: 'CALLED', called_at: calledAt }),
     };
+  }
+
+  /** Fan-out QUEUE_UPDATED / YOUR_TURN_CALLED via BranchQueueRoom DO. */
+  private async notifyBranchRoom(
+    body: BranchQueueBroadcastRequest,
+  ): Promise<void> {
+    if (!this.branchQueueRoom) return;
+    try {
+      const id = this.branchQueueRoom.idFromName(body.branchId);
+      const stub = this.branchQueueRoom.get(id);
+      await stub.fetch('https://branch-queue-room/broadcast', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    } catch {
+      /* do not fail host action if WS fan-out fails */
+    }
   }
 
   private async hold(ticket: TicketRow): Promise<HostActionResult> {
