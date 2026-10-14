@@ -33,10 +33,13 @@ export class InvalidTicketTransitionError extends Error {
 
 /** Apply a ticket status transition. Throws InvalidTicketTransitionError if illegal. */
 export function transitionTicket(
-  _current: TicketStatus,
-  _next: TicketStatus,
+  current: TicketStatus,
+  next: TicketStatus,
 ): TicketStatus {
-  throw new Error('Not implemented');
+  if ((VALID_TRANSITIONS[current] as readonly TicketStatus[]).includes(next)) {
+    return next;
+  }
+  throw new InvalidTicketTransitionError(current, next);
 }
 
 /**
@@ -44,8 +47,33 @@ export function transitionTicket(
  * PARTY_SIZE: match active bucket by paxCount against minPax/maxPax.
  * SERVICE_TYPE: select by bucketId regardless of paxCount.
  */
-export function resolveBucket(_input: ResolveBucketInput): Bucket {
-  throw new Error('Not implemented');
+export function resolveBucket(input: ResolveBucketInput): Bucket {
+  const { routingMode, buckets, paxCount, bucketId } = input;
+
+  if (routingMode === 'PARTY_SIZE') {
+    if (paxCount === undefined) {
+      throw new Error('paxCount is required for PARTY_SIZE routing');
+    }
+    const match = buckets.find(
+      (b) => b.isActive && b.minPax <= paxCount && b.maxPax >= paxCount,
+    );
+    if (!match) {
+      throw new Error(`No active bucket matches party size ${paxCount}`);
+    }
+    return match;
+  }
+
+  if (bucketId === undefined) {
+    throw new Error('bucketId is required for SERVICE_TYPE routing');
+  }
+  const bucket = buckets.find((b) => b.id === bucketId);
+  if (!bucket) {
+    throw new Error(`Bucket not found: ${bucketId}`);
+  }
+  if (!bucket.isActive) {
+    throw new Error(`Bucket is inactive: ${bucketId}`);
+  }
+  return bucket;
 }
 
 /**
@@ -53,7 +81,12 @@ export function resolveBucket(_input: ResolveBucketInput): Bucket {
  *   Math.ceil((partiesAheadInBucket + 1) / activeCountersInBucket) * rollingTurnoverMins
  */
 export function calculateEstimatedWait(
-  _input: CalculateEstimatedWaitInput,
+  input: CalculateEstimatedWaitInput,
 ): number {
-  throw new Error('Not implemented');
+  const { partiesAheadInBucket, activeCountersInBucket, rollingTurnoverMins } =
+    input;
+  return (
+    Math.ceil((partiesAheadInBucket + 1) / activeCountersInBucket) *
+    rollingTurnoverMins
+  );
 }
