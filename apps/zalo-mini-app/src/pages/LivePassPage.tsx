@@ -1,8 +1,142 @@
 /**
  * Live queue pass — `/ticket/:ticketId`.
- * RED stub — GREEN: A·014 readout, metric strip, YOUR_TURN_CALLED chassis flip.
+ * Giant readout, metric strip, YOUR_TURN_CALLED chassis flip.
  */
 
+import { useCallback, useEffect, useState } from 'react';
+import { useParams } from 'react-router-dom';
+import type { WsServerEvent } from '@luotdi/shared';
+import {
+  BraunChassis,
+  GridCell,
+  TabularMetric,
+} from '@luotdi/ui-braun';
+import { useQueueSocket } from '../hooks/useQueueSocket';
+
+type TicketPayload = {
+  id: string;
+  displayNumber: string;
+  status: string;
+  branchId: string;
+  branchName: string;
+  bucketId: string;
+  paxCount: number;
+  nowServing: string;
+  partiesAhead: number;
+  estimatedWaitMins: number;
+};
+
 export function LivePassPage() {
-  return <div data-page="live-pass" />;
+  const { ticketId } = useParams<{ ticketId: string }>();
+  const [ticket, setTicket] = useState<TicketPayload | null>(null);
+  const [yourTurn, setYourTurn] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!ticketId) return;
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const res = await fetch(`/api/tickets/${ticketId}`);
+        if (!res.ok) {
+          if (!cancelled) setError('Ticket not found');
+          return;
+        }
+        const data = (await res.json()) as TicketPayload;
+        if (!cancelled) setTicket(data);
+      } catch {
+        if (!cancelled) setError('Failed to load ticket');
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [ticketId]);
+
+  const onEvent = useCallback(
+    (event: WsServerEvent) => {
+      if (
+        event.type === 'YOUR_TURN_CALLED' &&
+        event.ticketId === ticketId
+      ) {
+        setYourTurn(true);
+      }
+    },
+    [ticketId],
+  );
+
+  useQueueSocket({
+    branchId: ticket?.branchId,
+    ticketId,
+    onEvent,
+  });
+
+  if (error && !ticket) {
+    return (
+      <BraunChassis className="m-4 p-4">
+        <p className="font-mono text-sm text-carbon">{error}</p>
+      </BraunChassis>
+    );
+  }
+
+  if (!ticket) {
+    return (
+      <BraunChassis className="m-4 p-4">
+        <p className="font-mono text-xs text-graphite tabular">LOADING</p>
+      </BraunChassis>
+    );
+  }
+
+  return (
+    <div data-testid="live-pass" className="m-4 flex flex-col gap-3">
+      <div
+        data-testid="live-pass-chassis"
+        data-braun="chassis"
+        className={
+          yourTurn
+            ? 'border border-grid rounded-none bg-signal-orange p-6 text-panel'
+            : 'border border-grid rounded-none bg-ink p-6 text-panel'
+        }
+      >
+        <p className="font-mono text-[10px] uppercase tracking-widest tabular opacity-80">
+          {ticket.branchName}
+        </p>
+        <div data-testid="ticket-display-number" className="mt-3">
+          <TabularMetric
+            size="display"
+            value={ticket.displayNumber}
+            className="text-panel"
+          />
+        </div>
+        {yourTurn ? (
+          <p className="mt-4 font-sans text-sm font-semibold uppercase tracking-wide">
+            PROCEED TO HOST STAND
+          </p>
+        ) : null}
+      </div>
+
+      <div
+        data-testid="live-pass-metrics"
+        className="grid grid-cols-3 border border-grid"
+      >
+        <GridCell label="NOW SERVING" className="border-0 border-r border-grid">
+          <TabularMetric size="lg" value={ticket.nowServing} />
+        </GridCell>
+        <GridCell
+          label="AHEAD OF YOU"
+          className="border-0 border-r border-grid"
+        >
+          <TabularMetric size="lg" value={String(ticket.partiesAhead)} />
+        </GridCell>
+        <GridCell label="EST. WAIT" className="border-0">
+          <TabularMetric
+            size="lg"
+            value={`${ticket.estimatedWaitMins} min`}
+          />
+        </GridCell>
+      </div>
+    </div>
+  );
 }
