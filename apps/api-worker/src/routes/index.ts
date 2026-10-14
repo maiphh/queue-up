@@ -1,2 +1,1 @@
-/** Route module stubs — Phase 1 */
-export {};
+export { tickets } from './tickets';
