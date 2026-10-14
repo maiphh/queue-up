@@ -86,6 +86,8 @@ export const ApiErrorCodeSchema = z.enum([
   'QUEUE_PAUSED',
   'FREE_QUOTA_EXCEEDED',
   'NOT_IMPLEMENTED',
+  'INVALID_TRANSITION',
+  'INVALID_BODY',
 ]);
 export type ApiErrorCode = z.infer<typeof ApiErrorCodeSchema>;
 
@@ -95,3 +97,58 @@ export const ApiErrorSchema = z.object({
   code: z.string(),
 });
 export type ApiError = z.infer<typeof ApiErrorSchema>;
+
+/** Host ad-hoc mutations on a ticket (`PATCH /api/host/tickets/:id/action`). */
+export const HostTicketActionSchema = z.enum([
+  'SUMMON',
+  'HOLD',
+  'SEAT',
+  'BUMP_PRIORITY',
+  'CHANGE_BUCKET',
+  'CANCEL',
+]);
+export type HostTicketAction = z.infer<typeof HostTicketActionSchema>;
+
+/**
+ * PATCH /api/host/tickets/:id/action request body.
+ * CHANGE_BUCKET requires `paxCount` and/or `bucketId`.
+ */
+export const HostTicketActionRequestSchema = z
+  .object({
+    action: HostTicketActionSchema,
+    /** Party size when changing bucket / resizing mid-wait. */
+    paxCount: z.number().int().positive().optional(),
+    /** Explicit target bucket (SERVICE_TYPE or override). */
+    bucketId: z.string().min(1).optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.action !== 'CHANGE_BUCKET') return;
+    if (data.paxCount === undefined && data.bucketId === undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'CHANGE_BUCKET requires paxCount and/or bucketId',
+        path: ['paxCount'],
+      });
+    }
+  });
+export type HostTicketActionRequest = z.infer<
+  typeof HostTicketActionRequestSchema
+>;
+
+/** PATCH /api/host/tickets/:id/action success body. */
+export const HostTicketActionResponseSchema = z.object({
+  id: z.string().min(1),
+  displayNumber: z.string().min(1),
+  status: TicketStatusSchema,
+  bucketId: z.string().min(1),
+  paxCount: z.number().int().positive(),
+  priorityBoost: z.number().int().nonnegative(),
+  createdAt: z.number().int().positive(),
+  calledAt: z.number().int().positive().nullable().optional(),
+  heldAt: z.number().int().positive().nullable().optional(),
+  seatedAt: z.number().int().positive().nullable().optional(),
+  cancelledAt: z.number().int().positive().nullable().optional(),
+});
+export type HostTicketActionResponse = z.infer<
+  typeof HostTicketActionResponseSchema
+>;
