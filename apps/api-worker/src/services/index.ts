@@ -11,3 +11,8 @@ export {
   type DailyResetResult,
   type SweepExpiredHoldsResult,
 } from './cron';
+
+export {
+  ZnsDispatcherService,
+  type ZnsSender,
+} from './zns-dispatcher';

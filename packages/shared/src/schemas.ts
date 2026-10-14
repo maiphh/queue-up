@@ -224,3 +224,64 @@ export const BranchQueueBroadcastRequestSchema = z.object({
 export type BranchQueueBroadcastRequest = z.infer<
   typeof BranchQueueBroadcastRequestSchema
 >;
+
+// --- ZNS wallet ledger (Phase 2.2) ---
+
+/** Matches `wallet_ledger.tx_type` in schema.sql. */
+export const WalletLedgerTxTypeSchema = z.enum([
+  'TOPUP_VIETQR',
+  'ZNS_CALL_ALERT',
+  'ADMIN_GRANT',
+]);
+export type WalletLedgerTxType = z.infer<typeof WalletLedgerTxTypeSchema>;
+
+/** Prepaid ZNS "2 spots away" fee (VND). Deducted only when balance >= this. */
+export const ZNS_APPROACHING_FEE_VND = 400 as const;
+
+/**
+ * Idempotency key for ApproachingTurn ZNS — stored in `wallet_ledger.reference_code`.
+ * Never charge/send twice for the same ticket.
+ */
+export function znsApproachingIdempotencyKey(ticketId: string): string {
+  return `zns_approaching_${ticketId}`;
+}
+
+/** Ledger row shape (camelCase contract; D1 columns are snake_case). */
+export const WalletLedgerEntrySchema = z.object({
+  id: z.string().min(1),
+  merchantId: z.string().min(1),
+  ticketId: z.string().min(1).nullable().optional(),
+  amountVnd: z.number().int(),
+  txType: WalletLedgerTxTypeSchema,
+  referenceCode: z.string().min(1).nullable().optional(),
+  createdAt: z.number().int().positive(),
+});
+export type WalletLedgerEntry = z.infer<typeof WalletLedgerEntrySchema>;
+
+/** Outbound ZNS payload for ApproachingTurn (stub recorder in tests). */
+export const ZnsApproachingDispatchSchema = z.object({
+  template: z.literal('APPROACHING_TURN'),
+  merchantId: z.string().min(1),
+  ticketId: z.string().min(1),
+  displayNumber: z.string().min(1),
+  partiesAhead: z.literal(2),
+  at: z.number().int().positive(),
+});
+export type ZnsApproachingDispatch = z.infer<typeof ZnsApproachingDispatchSchema>;
+
+export const ApproachingTurnSkipReasonSchema = z.enum([
+  'INSUFFICIENT_WALLET',
+  'NO_CANDIDATE',
+  'ALREADY_SENT',
+]);
+export type ApproachingTurnSkipReason = z.infer<
+  typeof ApproachingTurnSkipReasonSchema
+>;
+
+/** Result of `ZnsDispatcherService.onTicketSeated` / `notifyApproachingTurn`. */
+export const ApproachingTurnResultSchema = z.object({
+  notifiedTicketId: z.string().min(1).nullable(),
+  charged: z.boolean(),
+  skippedReason: ApproachingTurnSkipReasonSchema.optional(),
+});
+export type ApproachingTurnResult = z.infer<typeof ApproachingTurnResultSchema>;
