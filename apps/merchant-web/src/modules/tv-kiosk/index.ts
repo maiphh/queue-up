@@ -1,0 +1,1 @@
+export { TvKioskPage } from './TvKioskPage';
