@@ -1,0 +1,137 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`BraunChassis > matches snapshot 1`] = `
+<div
+  class="bg-chassis border border-grid rounded-none p-4"
+  data-braun="chassis"
+>
+  shell
+</div>
+`;
+
+exports[`GridCell > matches snapshot 1`] = `
+<div
+  class="border border-grid bg-panel rounded-none"
+  data-braun="grid-cell"
+>
+  <div
+    class="border-b border-grid px-3 py-1.5"
+  >
+    <p
+      class="font-mono text-[10px] font-medium uppercase tracking-widest text-graphite tabular"
+    >
+      02 / EST. WAIT
+    </p>
+  </div>
+  <div
+    class="p-3"
+  >
+    12 min
+  </div>
+</div>
+`;
+
+exports[`KeycapButton > matches snapshot for primary 1`] = `
+<button
+  class="inline-flex items-center justify-center gap-2 min-h-[48px] px-4 py-2 border border-b-2 font-sans text-sm font-semibold uppercase tracking-wide rounded-none transition-none active:translate-y-[2px] active:border-b disabled:pointer-events-none disabled:opacity-40 hover:brightness-110 bg-signal-orange text-panel border-carbon"
+  data-braun="keycap"
+  data-variant="primary"
+  type="button"
+>
+  ISSUE QUEUE PASS
+</button>
+`;
+
+exports[`LedIndicator > matches snapshot 1`] = `
+<span
+  aria-label="active"
+  class="inline-block h-[6px] w-[6px] shrink-0 rounded-led bg-signal-green"
+  data-braun="led"
+  data-state="active"
+  role="status"
+/>
+`;
+
+exports[`SegmentedMatrix > matches snapshot 1`] = `
+<div
+  class="inline-flex items-stretch"
+  data-braun="segmented-matrix"
+  role="radiogroup"
+>
+  <button
+    aria-checked="false"
+    class="min-h-[48px] min-w-[44px] px-3 border border-grid bg-panel font-mono text-sm tabular text-carbon rounded-none disabled:pointer-events-none disabled:opacity-40"
+    role="radio"
+    type="button"
+  >
+    1
+  </button>
+  <button
+    aria-checked="false"
+    class="min-h-[48px] min-w-[44px] px-3 border border-grid bg-panel font-mono text-sm tabular text-carbon rounded-none disabled:pointer-events-none disabled:opacity-40 -ml-[1px]"
+    role="radio"
+    type="button"
+  >
+    2
+  </button>
+  <button
+    aria-checked="true"
+    class="min-h-[48px] min-w-[44px] px-3 border border-grid bg-panel font-mono text-sm tabular text-carbon rounded-none disabled:pointer-events-none disabled:opacity-40 -ml-[1px] relative z-[1] border-carbon bg-ink text-panel"
+    data-selected="true"
+    role="radio"
+    type="button"
+  >
+    3
+  </button>
+  <button
+    aria-checked="false"
+    class="min-h-[48px] min-w-[44px] px-3 border border-grid bg-panel font-mono text-sm tabular text-carbon rounded-none disabled:pointer-events-none disabled:opacity-40 -ml-[1px]"
+    role="radio"
+    type="button"
+  >
+    4
+  </button>
+  <button
+    aria-checked="false"
+    class="min-h-[48px] min-w-[44px] px-3 border border-grid bg-panel font-mono text-sm tabular text-carbon rounded-none disabled:pointer-events-none disabled:opacity-40 -ml-[1px]"
+    role="radio"
+    type="button"
+  >
+    5
+  </button>
+  <button
+    aria-checked="false"
+    class="min-h-[48px] min-w-[44px] px-3 border border-grid bg-panel font-mono text-sm tabular text-carbon rounded-none disabled:pointer-events-none disabled:opacity-40 -ml-[1px]"
+    role="radio"
+    type="button"
+  >
+    6
+  </button>
+  <button
+    aria-checked="false"
+    class="min-h-[48px] min-w-[44px] px-3 border border-grid bg-panel font-mono text-sm tabular text-carbon rounded-none disabled:pointer-events-none disabled:opacity-40 -ml-[1px]"
+    role="radio"
+    type="button"
+  >
+    7
+  </button>
+  <button
+    aria-checked="false"
+    class="min-h-[48px] min-w-[44px] px-3 border border-grid bg-panel font-mono text-sm tabular text-carbon rounded-none disabled:pointer-events-none disabled:opacity-40 -ml-[1px]"
+    role="radio"
+    type="button"
+  >
+    8+
+  </button>
+</div>
+`;
+
+exports[`TabularMetric > matches snapshot for display size 1`] = `
+<span
+  class="font-mono tabular text-carbon rounded-none text-5xl leading-none tracking-tight"
+  data-braun="tabular-metric"
+  data-size="display"
+>
+  A·014
+</span>
+`;

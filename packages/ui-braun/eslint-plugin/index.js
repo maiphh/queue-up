@@ -6,7 +6,7 @@
 const BANNED_ROUNDED =
   /\brounded-(?:md|lg|xl|2xl|3xl|full)\b/;
 const BANNED_SHADOW =
-  /\bshadow(?:-sm|-md|-lg|-xl|-2xl)?\b/;
+  /\bshadow(?!-none)(?:-sm|-md|-lg|-xl|-2xl)?\b/;
 // Common emoji / pictograph ranges
 const EMOJI_RE =
   /[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F000}-\u{1F02F}\u{1F0A0}-\u{1F0FF}]/u;
