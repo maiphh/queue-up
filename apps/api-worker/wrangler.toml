@@ -3,6 +3,10 @@ main = "src/index.ts"
 compatibility_date = "2025-10-11"
 compatibility_flags = ["nodejs_compat"]
 
+# 04:00 AM Asia/Ho_Chi_Minh (UTC+7) — nightly seq reset + hold sweeper
+[triggers]
+crons = ["0 21 * * *"]
+
 [[d1_databases]]
 binding = "DB"
 database_name = "luotdi-db"
