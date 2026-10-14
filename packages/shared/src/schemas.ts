@@ -285,3 +285,58 @@ export const ApproachingTurnResultSchema = z.object({
   skippedReason: ApproachingTurnSkipReasonSchema.optional(),
 });
 export type ApproachingTurnResult = z.infer<typeof ApproachingTurnResultSchema>;
+
+// --- Sepay VietQR top-up webhook (Phase 4.3) ---
+
+/**
+ * Transfer memo format: `LUOTDI <MERCHANT_SLUG>`.
+ * Parsed from Sepay `content` (original bank memo).
+ */
+export const VIETQR_MEMO_PREFIX = 'LUOTDI' as const;
+
+export function buildVietQrMemo(merchantSlug: string): string {
+  return `${VIETQR_MEMO_PREFIX} ${merchantSlug}`;
+}
+
+/** Extract merchant slug from transfer content containing `LUOTDI <slug>`. */
+export function parseVietQrMemoSlug(content: string): string | null {
+  const match = content.match(/\bLUOTDI\s+([A-Za-z0-9][A-Za-z0-9_-]*)/i);
+  return match?.[1]?.toLowerCase() ?? null;
+}
+
+/** Idempotency key for Sepay top-up — stored in `wallet_ledger.reference_code`. */
+export function sepayTopupIdempotencyKey(sepayTxnId: number | string): string {
+  return `sepay_topup_${sepayTxnId}`;
+}
+
+/** Incoming Sepay money-in webhook body (subset used by LượtĐi). */
+export const SepayWebhookPayloadSchema = z.object({
+  id: z.union([z.number().int(), z.string().min(1)]),
+  gateway: z.string().optional(),
+  transactionDate: z.string().optional(),
+  accountNumber: z.string().optional(),
+  subAccount: z.string().nullable().optional(),
+  code: z.string().nullable().optional(),
+  content: z.string().min(1),
+  transferType: z.enum(['in', 'out']),
+  description: z.string().optional(),
+  transferAmount: z.number().int().positive(),
+  referenceCode: z.string().nullable().optional(),
+});
+export type SepayWebhookPayload = z.infer<typeof SepayWebhookPayloadSchema>;
+
+export const SepayWebhookResultSchema = z.object({
+  success: z.boolean(),
+  credited: z.boolean().optional(),
+  merchantId: z.string().min(1).optional(),
+  amountVnd: z.number().int().optional(),
+  skippedReason: z
+    .enum([
+      'NOT_INCOMING',
+      'MERCHANT_NOT_FOUND',
+      'ALREADY_PROCESSED',
+      'INVALID_MEMO',
+    ])
+    .optional(),
+});
+export type SepayWebhookResult = z.infer<typeof SepayWebhookResultSchema>;
