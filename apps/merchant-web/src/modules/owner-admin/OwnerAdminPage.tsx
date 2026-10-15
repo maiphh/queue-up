@@ -1,532 +1,159 @@
 /**
- * Client portfolio `/client` and branch setup `/client/branches/:branchId`.
- * Bucket editor, VietQR top-up memo LUOTDI <slug>, printable QR standee.
+ * Client portfolio `/client` (M2) and branch setup `/client/branches/:branchId` (M3), Style D.
+ * Buckets + the brand-shared ZNS wallet belong to the Client; ops toggles live in Manager · Cài đặt.
  */
-
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
-import { buildVietQrMemo, clientCopy } from '@luotdi/shared';
-import {
-  BraunChassis,
-  GridCell,
-  KeycapButton,
-  TabularMetric,
-} from '@luotdi/ui-braun';
+import { Link, useParams } from 'react-router-dom';
+import { BeVe } from '@luotdi/design-d';
+import { clientCopy as c } from '@luotdi/shared';
+import { BranchSetupView } from './BranchSetupView';
+import { ClientRail } from './ClientRail';
 
-type AdminBucket = {
-  id: string;
-  prefix: string;
-  labelVi: string;
-  labelEn: string;
-  minPax: number;
-  maxPax: number;
-  activeCounters: number;
-  isActive: boolean;
+export type PortfolioBranch = {
+  id: string; name: string; address: string; district: string; tvSlug: string; waitingCount: number;
+  servedToday: number; avgWaitMins: number | null; isPaused: boolean; queueStatus: string;
 };
-
-type OwnerConfig = {
-  merchantId: string;
-  merchantSlug: string;
-  merchantName: string;
-  branchId: string;
-  branchName: string;
-  walletBalanceVnd: number;
-  planTier: string;
-  buckets: AdminBucket[];
-  walkInQrUrl: string;
-  vietQr: {
-    accountNumber: string;
-    bankCode: string;
-    accountName: string;
-  };
+export type PortfolioBrand = {
+  id: string; name: string; slug: string; industryType: string; planTier: string;
+  walletBalanceVnd: number; walletMessages: number; walletLow: boolean; branches: PortfolioBranch[];
 };
-
-type PortfolioBranch = {
-  id: string;
-  name: string;
-  district: string;
-  waitingCount: number;
-  isPaused: boolean;
-  queueStatus: string;
-};
-
-type PortfolioBrand = {
-  id: string;
-  name: string;
-  slug: string;
-  industryType: string;
-  branches: PortfolioBranch[];
-};
-
-type ClientPortfolio = {
-  clientId: string;
-  clientName: string;
+type Portfolio = {
+  clientId: string; clientName: string;
+  kpis: { waiting: number; servedToday: number; avgWaitMins: number | null; openBranches: number; totalBranches: number; pausedBranches: number };
   brands: PortfolioBrand[];
 };
 
-const PREFIX_ORDER = ['A', 'B', 'C', 'D', 'E', 'F'] as const;
-
-function nextPrefix(existing: AdminBucket[]): string | null {
-  const used = new Set(existing.map((b) => b.prefix.toUpperCase()));
-  return PREFIX_ORDER.find((p) => !used.has(p)) ?? null;
-}
-
-function buildVietQrUrl(opts: {
-  accountNumber: string;
-  bankCode: string;
-  amount: number;
-  memo: string;
-}): string {
-  const params = new URLSearchParams({
-    acc: opts.accountNumber,
-    bank: opts.bankCode,
-    amount: String(opts.amount),
-    des: opts.memo,
-  });
-  return `https://img.vietqr.io/image/${encodeURIComponent(opts.bankCode)}-${encodeURIComponent(opts.accountNumber)}-compact.png?${params.toString()}`;
-}
+const vnd = (n: number) => `${n.toLocaleString('vi-VN')}đ`;
+const initials = (name: string) => {
+  const digits = name.match(/\d+/)?.[0];
+  const letters = name.replace(/\d+/g, '').trim().split(/\s+/).filter(Boolean).map((w) => w[0]!.toUpperCase());
+  return (digits ? `${letters[0] ?? ''}${digits}` : letters.slice(-2).join('')).slice(0, 3);
+};
+const LOGO_COLOURS = [['var(--d-navy)', 'var(--d-yellow)'], ['var(--d-green)', '#fff'], ['var(--d-hot)', '#fff']] as const;
 
 function ClientPortfolioView() {
-  const navigate = useNavigate();
-  const [portfolio, setPortfolio] = useState<ClientPortfolio | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [data, setData] = useState<Portfolio | null>(null);
+  const [error, setError] = useState(false);
+  const [q, setQ] = useState('');
 
-  const loadPortfolio = useCallback(async () => {
+  const load = useCallback(async () => {
+    setError(false);
     try {
       const res = await fetch('/api/client/portfolio');
-      if (!res.ok) {
-        setError('Không tải được danh sách thương hiệu.');
-        return;
-      }
-      const data = (await res.json()) as ClientPortfolio;
-      setPortfolio(data);
-      setError(null);
+      if (!res.ok) throw new Error();
+      setData((await res.json()) as Portfolio);
     } catch {
-      setError('Không tải được danh sách thương hiệu.');
+      setError(true);
     }
   }, []);
+  useEffect(() => { void load(); }, [load]);
 
-  useEffect(() => {
-    void loadPortfolio();
-  }, [loadPortfolio]);
-
-  if (error && !portfolio) {
-    return (
-      <BraunChassis className="m-4 p-4">
-        <p className="font-sans text-sm text-carbon">{error}</p>
-      </BraunChassis>
-    );
-  }
-
-  if (!portfolio) {
-    return (
-      <BraunChassis className="m-4 p-4">
-        <p className="font-sans text-sm text-graphite">Đang tải.</p>
-      </BraunChassis>
-    );
-  }
+  const needle = q.trim().toLocaleLowerCase('vi');
+  const brands = useMemo(
+    () => (data?.brands ?? [])
+      .map((b) => ({ ...b, branches: needle ? b.branches.filter((br) => `${br.name} ${br.address}`.toLocaleLowerCase('vi').includes(needle)) : b.branches }))
+      .filter((b) => !needle || b.branches.length > 0),
+    [data, needle],
+  );
 
   return (
-    <div
-      data-page="client-portfolio"
-      className="flex min-h-screen flex-col bg-chassis text-carbon"
-    >
-      <header className="border-b border-grid bg-panel px-4 py-3">
-        <p className="font-mono text-[10px] uppercase tracking-widest text-graphite tabular">
-          Client
-        </p>
-        <h1 className="font-sans text-base font-semibold text-carbon">
-          {portfolio.clientName}
-        </h1>
-      </header>
-
-      <section className="m-4" data-testid="client-brands">
-        <p className="mb-3 font-mono text-[10px] uppercase tracking-widest text-graphite tabular">
-          {clientCopy.brands}
-        </p>
-        <div className="flex flex-col gap-4">
-          {portfolio.brands.map((brand) => (
-            <GridCell key={brand.id} label={brand.slug}>
-              <h2 className="mb-3 font-sans text-base font-semibold text-carbon">
-                {brand.name}
-              </h2>
-              <ul className="flex flex-col gap-3">
-                {brand.branches.map((branch) => {
-                  const statusLabel = branch.isPaused
-                    ? clientCopy.statusPaused
-                    : clientCopy.statusOpen;
-                  return (
-                    <li
-                      key={branch.id}
-                      data-testid={`portfolio-branch-${branch.id}`}
-                      className="border border-grid bg-chassis p-3"
-                    >
-                      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
-                        <p className="font-sans text-sm font-semibold text-carbon">
-                          {branch.name}
-                        </p>
-                        <p className="font-mono text-[10px] uppercase tracking-widest text-graphite tabular">
-                          {statusLabel}
-                        </p>
-                      </div>
-                      <p className="mb-3 font-mono text-xs text-graphite tabular">
-                        Đang chờ{' '}
-                        <TabularMetric
-                          size="md"
-                          value={String(branch.waitingCount)}
-                        />
-                      </p>
-                      <div className="flex flex-wrap gap-2">
-                        <KeycapButton
-                          variant="primary"
-                          onClick={() => navigate(`/manage/${branch.id}`)}
-                        >
-                          {clientCopy.viewFloor}
-                        </KeycapButton>
-                        <KeycapButton
-                          variant="secondary"
-                          onClick={() =>
-                            navigate(`/client/branches/${branch.id}`)
-                          }
-                        >
-                          {clientCopy.setup}
-                        </KeycapButton>
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            </GridCell>
-          ))}
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function BranchSetupView({ branchId }: { branchId: string }) {
-  const [config, setConfig] = useState<OwnerConfig | null>(null);
-  const [buckets, setBuckets] = useState<AdminBucket[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [topUpAmount, setTopUpAmount] = useState('50000');
-  const [vietQrUrl, setVietQrUrl] = useState<string | null>(null);
-
-  const loadConfig = useCallback(async () => {
-    try {
-      const qs = `?branchId=${encodeURIComponent(branchId)}`;
-      const res = await fetch(`/api/admin/config${qs}`);
-      if (!res.ok) {
-        setError('Không tải được cấu hình chi nhánh.');
-        return;
-      }
-      const data = (await res.json()) as OwnerConfig;
-      setConfig(data);
-      setBuckets(data.buckets.map((b) => ({ ...b })));
-      setError(null);
-    } catch {
-      setError('Không tải được cấu hình chi nhánh.');
-    }
-  }, [branchId]);
-
-  useEffect(() => {
-    void loadConfig();
-  }, [loadConfig]);
-
-  const memo = useMemo(
-    () => (config ? buildVietQrMemo(config.merchantSlug) : ''),
-    [config],
-  );
-
-  const updateBucketField = useCallback(
-    (
-      prefix: string,
-      field: 'minPax' | 'maxPax' | 'activeCounters',
-      raw: string,
-    ) => {
-      const n = Number.parseInt(raw, 10);
-      setBuckets((prev) =>
-        prev.map((b) =>
-          b.prefix === prefix
-            ? { ...b, [field]: Number.isFinite(n) ? n : 0 }
-            : b,
-        ),
-      );
-    },
-    [],
-  );
-
-  const addBucket = useCallback(() => {
-    setBuckets((prev) => {
-      const prefix = nextPrefix(prev);
-      if (!prefix) return prev;
-      const id = `bucket-${prefix.toLowerCase()}`;
-      return [
-        ...prev,
-        {
-          id,
-          prefix,
-          labelVi: `BAN ${prefix}`,
-          labelEn: `TABLE ${prefix}`,
-          minPax: 1,
-          maxPax: 2,
-          activeCounters: 1,
-          isActive: true,
-        },
-      ];
-    });
-  }, []);
-
-  const saveBuckets = useCallback(async () => {
-    try {
-      const res = await fetch('/api/admin/buckets', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          branchId: config?.branchId,
-          buckets: buckets.map((b) => ({
-            id: b.id,
-            prefix: b.prefix,
-            minPax: b.minPax,
-            maxPax: b.maxPax,
-            activeCounters: b.activeCounters,
-            isActive: b.isActive,
-            labelVi: b.labelVi,
-            labelEn: b.labelEn,
-          })),
-        }),
-      });
-      if (!res.ok) {
-        setError('Không lưu được bàn.');
-        return;
-      }
-      setError(null);
-      await loadConfig();
-    } catch {
-      setError('Không lưu được bàn.');
-    }
-  }, [buckets, config?.branchId, loadConfig]);
-
-  const generateVietQr = useCallback(() => {
-    if (!config) return;
-    const amount = Number.parseInt(topUpAmount.replace(/\D/g, ''), 10) || 0;
-    const url = buildVietQrUrl({
-      accountNumber: config.vietQr.accountNumber,
-      bankCode: config.vietQr.bankCode,
-      amount,
-      memo: buildVietQrMemo(config.merchantSlug),
-    });
-    setVietQrUrl(url);
-  }, [config, topUpAmount]);
-
-  if (error && !config) {
-    return (
-      <BraunChassis className="m-4 p-4">
-        <p className="font-sans text-sm text-carbon">{error}</p>
-      </BraunChassis>
-    );
-  }
-
-  if (!config) {
-    return (
-      <BraunChassis className="m-4 p-4">
-        <p className="font-sans text-sm text-graphite">Đang tải.</p>
-      </BraunChassis>
-    );
-  }
-
-  return (
-    <div
-      data-page="owner-admin"
-      className="flex min-h-screen flex-col bg-chassis text-carbon"
-    >
-      <header className="border-b border-grid bg-panel px-4 py-3">
-        <p className="font-mono text-[10px] uppercase tracking-widest text-graphite tabular">
-          {config.merchantName}
-        </p>
-        <h1 className="font-sans text-base font-semibold text-carbon">
-          {config.branchName}
-        </h1>
-      </header>
-
-      {error ? (
-        <p className="mx-4 mt-3 font-sans text-sm text-carbon">{error}</p>
-      ) : null}
-
-      <div className="grid flex-1 gap-4 p-4 lg:grid-cols-2">
-        <section
-          data-testid="bucket-editor"
-          className="border border-grid bg-panel p-4"
-        >
-          <p className="mb-3 font-mono text-[10px] uppercase tracking-widest text-graphite tabular">
-            BUCKET EDITOR
-          </p>
-          <ul className="flex flex-col gap-3">
-            {buckets.map((bucket) => (
-              <li
-                key={bucket.prefix}
-                data-testid={`bucket-row-${bucket.prefix}`}
-                className="border border-grid bg-chassis p-3"
-              >
-                <div className="mb-2 flex items-center gap-2">
-                  <label className="font-mono text-[10px] uppercase tracking-widest text-graphite">
-                    {clientCopy.prefix}
-                    <input
-                      className="ml-2 min-h-[48px] w-12 border border-grid bg-panel px-2 font-mono text-sm tabular"
-                      value={bucket.prefix}
-                      readOnly
-                      aria-label={clientCopy.prefix}
-                    />
-                  </label>
-                </div>
-                <div className="flex flex-wrap gap-3">
-                  <label className="font-mono text-[10px] uppercase tracking-widest text-graphite">
-                    {clientCopy.minPax}
-                    <input
-                      type="number"
-                      className="mt-1 block min-h-[48px] w-20 border border-grid bg-panel px-2 font-mono text-sm tabular"
-                      value={bucket.minPax}
-                      aria-label={clientCopy.minPax}
-                      onChange={(e) =>
-                        updateBucketField(
-                          bucket.prefix,
-                          'minPax',
-                          e.target.value,
-                        )
-                      }
-                    />
-                  </label>
-                  <label className="font-mono text-[10px] uppercase tracking-widest text-graphite">
-                    {clientCopy.maxPax}
-                    <input
-                      type="number"
-                      className="mt-1 block min-h-[48px] w-20 border border-grid bg-panel px-2 font-mono text-sm tabular"
-                      value={bucket.maxPax}
-                      aria-label={clientCopy.maxPax}
-                      onChange={(e) =>
-                        updateBucketField(
-                          bucket.prefix,
-                          'maxPax',
-                          e.target.value,
-                        )
-                      }
-                    />
-                  </label>
-                  <label className="font-mono text-[10px] uppercase tracking-widest text-graphite">
-                    {clientCopy.counters}
-                    <input
-                      type="number"
-                      className="mt-1 block min-h-[48px] w-20 border border-grid bg-panel px-2 font-mono text-sm tabular"
-                      value={bucket.activeCounters}
-                      aria-label={clientCopy.counters}
-                      onChange={(e) =>
-                        updateBucketField(
-                          bucket.prefix,
-                          'activeCounters',
-                          e.target.value,
-                        )
-                      }
-                    />
-                  </label>
-                </div>
-              </li>
-            ))}
-          </ul>
-          <div className="mt-4 flex flex-wrap gap-2">
-            <KeycapButton
-              variant="secondary"
-              onClick={addBucket}
-              disabled={!nextPrefix(buckets)}
-            >
-              {clientCopy.addBucket}
-            </KeycapButton>
-            <KeycapButton variant="primary" onClick={() => void saveBuckets()}>
-              {clientCopy.save}
-            </KeycapButton>
+    <div data-page="client-portfolio" className="d-root cc-app">
+      <ClientRail />
+      <div className="cc-main r4-main">
+        <header className="cc-top">
+          <div>
+            <h1 className="r4-title" style={{ fontSize: 26 }}>{data?.clientName ?? c.portfolioTitle}</h1>
+            {data ? <span className="d-muted" style={{ fontSize: 13 }}>{c.portfolioSub(data.brands.length, data.kpis.totalBranches)}</span> : null}
           </div>
-        </section>
+          <span className="cc-sp" />
+          <input className="r4-inp" style={{ width: 240 }} placeholder={c.searchBranch} aria-label={c.searchBranch} value={q} onChange={(e) => setQ(e.target.value)} />
+          {data ? <span className="d-pill" title={c.accountSwitchHint}>{data.clientName}</span> : null}
+        </header>
 
-        <section
-          data-testid="vietqr-topup"
-          className="border border-grid bg-panel p-4"
-        >
-          <GridCell label={clientCopy.wallet} className="mb-3">
-            <TabularMetric
-              size="lg"
-              value={`${config.walletBalanceVnd.toLocaleString('en-US')} VND`}
-            />
-          </GridCell>
-          <p className="mb-1 font-mono text-[10px] uppercase tracking-widest text-graphite">
-            TRANSFER MEMO
-          </p>
-          <p
-            data-testid="vietqr-memo"
-            className="mb-3 border border-grid bg-chassis px-3 py-2 font-mono text-sm tabular"
-          >
-            {memo}
-          </p>
-          <label className="font-mono text-[10px] uppercase tracking-widest text-graphite">
-            Số tiền VND
-            <input
-              type="number"
-              className="mt-1 mb-3 block min-h-[48px] w-full border border-grid bg-chassis px-3 font-mono text-sm tabular"
-              value={topUpAmount}
-              aria-label="Số tiền VND"
-              onChange={(e) => setTopUpAmount(e.target.value)}
-            />
-          </label>
-          <KeycapButton variant="primary" onClick={generateVietQr}>
-            {clientCopy.createTransfer}
-          </KeycapButton>
-          {vietQrUrl ? (
-            <div
-              data-testid="vietqr-payload"
-              className="mt-3 border border-grid bg-chassis p-3"
-            >
-              <img
-                src={vietQrUrl}
-                alt="VietQR top-up"
-                className="mx-auto max-h-48 border border-grid"
-              />
-              <p className="mt-2 break-all font-mono text-[10px] text-graphite tabular">
-                {vietQrUrl}
-              </p>
+        {error ? (
+          <div className="r4-card r4-center" style={{ minHeight: 280 }} data-testid="portfolio-error">
+            <p className="cc-error" role="alert">{c.loadError}</p>
+            <button type="button" className="d-pill" onClick={() => void load()}>{c.retry}</button>
+          </div>
+        ) : !data ? (
+          <div data-testid="portfolio-loading" style={{ display: 'grid', gap: 14 }}>
+            <div className="r4-kpis" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>{[0, 1, 2, 3].map((i) => <div key={i} className="r4-skel" style={{ height: 88 }} />)}</div>
+            <div className="r4-skel" style={{ height: 200 }} />
+            <p className="d-muted" style={{ textAlign: 'center' }}>{c.loading}</p>
+          </div>
+        ) : data.brands.length === 0 ? (
+          <div className="r4-card r4-center" style={{ minHeight: 320 }} data-testid="portfolio-empty">
+            <BeVe pose="idle" size={150} />
+            <b>{c.emptyTitle}</b>
+            <p>{c.emptyBody}</p>
+          </div>
+        ) : (
+          <>
+            <div className="r4-kpis" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }} data-testid="portfolio-kpis">
+              <div className="r4-kpi"><span>{c.kWaiting}</span><b>{data.kpis.waiting} <small>{c.groups}</small></b></div>
+              <div className="r4-kpi"><span>{c.kServed}</span><b>{data.kpis.servedToday}</b></div>
+              <div className="r4-kpi"><span>{c.kAvg}</span><b>{data.kpis.avgWaitMins ?? '—'} <small>phút</small></b></div>
+              <div className="r4-kpi">
+                <span>{c.kOpen}</span><b>{data.kpis.openBranches}<small>/{data.kpis.totalBranches}</small></b>
+                {data.kpis.pausedBranches ? <em className="r4-dn">{c.pausedCount(data.kpis.pausedBranches)}</em> : null}
+              </div>
             </div>
-          ) : null}
-        </section>
+            {brands.map((brand, i) => {
+              const [bg, fg] = LOGO_COLOURS[i % LOGO_COLOURS.length]!;
+              return (
+                <section key={brand.id} className="r4-card" style={{ background: '#fbfaf3' }} data-testid={`portfolio-brand-${brand.id}`}>
+                  <div className="r4-row" style={{ marginBottom: 12 }}>
+                    <span className="r4-logo" style={{ background: bg, color: fg }} aria-hidden="true">{initials(brand.name)}</span>
+                    <div>
+                      <div className="r4-row" style={{ gap: 6 }}>
+                        <h2 className="r4-title" style={{ fontSize: 18 }}>{brand.name}</h2>
+                        <span className={brand.planTier === 'PRO' ? 'r4-plan r4-plan-pro' : 'r4-plan r4-plan-free'}>{brand.planTier}</span>
+                      </div>
+                      <span className="d-muted" style={{ fontSize: 13 }}>{c.industry[brand.industryType as keyof typeof c.industry] ?? brand.industryType} · {c.branchCount(brand.branches.length)}</span>
+                    </div>
+                    <span className="r4-sp" />
+                    <span className={brand.walletLow ? 'r4-sc r4-sc-h' : 'r4-sc r4-sc-n'} data-testid={`wallet-chip-${brand.id}`}>{c.walletChip(vnd(brand.walletBalanceVnd))}</span>
+                    <span className="d-muted" style={{ fontSize: 12.5 }}>≈ {brand.walletMessages} {c.msgs}</span>
+                    {brand.branches[0] ? <Link className="d-pill r4-pill-sm" to={`/client/branches/${brand.branches[0].id}?tab=wallet`}>{c.topUp}</Link> : null}
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
+                    {brand.branches.map((b) => (
+                      <article key={b.id} className="r4-card" data-testid={`portfolio-branch-${b.id}`} style={{ padding: 14 }}>
+                        <div className="r4-row" style={{ alignItems: 'flex-start' }}>
+                          <div className="r4-sp">
+                            <h3 style={{ margin: 0, font: '700 16px var(--d-font-display)' }}>{b.name}</h3>
+                            <small className="d-muted">{b.address}{b.district ? `, ${b.district}` : ''}</small>
+                          </div>
+                          <span className={b.isPaused ? 'r4-sc r4-sc-y' : 'r4-sc r4-sc-g'}><i />{b.isPaused ? c.statusPaused : c.statusOpen}</span>
+                        </div>
+                        <div className="r4-row" style={{ margin: '10px 0', gap: 14, font: '500 13px var(--d-font-body)' }}>
+                          <span><b style={{ font: '800 26px var(--d-font-display)', color: 'var(--d-navy)' }}>{b.waitingCount}</b> {c.waiting}</span>
+                          <span><b style={{ font: '700 15px var(--d-font-display)' }}>{b.avgWaitMins == null ? '—' : `${b.avgWaitMins} phút`}</b> {c.avgShort}</span>
+                          <span><b style={{ font: '700 15px var(--d-font-display)' }}>{b.servedToday}</b> {c.today}</span>
+                        </div>
+                        <div className="r4-row">
+                          <Link className="d-pill d-pill-go r4-pill-sm" to={`/manage/${b.id}`}>{c.viewFloor}</Link>
+                          <Link className="d-pill r4-pill-sm" to={`/client/branches/${b.id}`}>{c.setup}</Link>
+                          <a className="d-pill r4-pill-sm" href={`/tv/${b.tvSlug}`} target="_blank" rel="noreferrer">TV</a>
+                        </div>
+                      </article>
+                    ))}
+                    <div className="r4-tile" aria-disabled="true" title={c.requestBranchHint}>
+                      <b>+ {c.requestBranch}</b>{c.requestBranchSub}
+                    </div>
+                  </div>
+                </section>
+              );
+            })}
+          </>
+        )}
       </div>
-
-      <section
-        data-testid="qr-standee"
-        className="m-4 border border-grid bg-panel p-6 print:block print:m-0 print:border-0 print:p-8"
-      >
-        <p className="mb-2 text-center font-mono text-[10px] uppercase tracking-widest text-graphite tabular">
-          A5 STANDEE / PRINT
-        </p>
-        <h2 className="mb-4 text-center font-sans text-xl font-semibold tracking-wide">
-          SCAN TO QUEUE — LUOTDI
-        </h2>
-        <p className="mb-4 text-center font-mono text-sm text-graphite">
-          {config.branchName}
-        </p>
-        <img
-          src={config.walkInQrUrl}
-          alt="Walk-in QR"
-          className="mx-auto h-48 w-48 border border-grid bg-panel object-contain"
-        />
-        <p className="mt-4 text-center font-mono text-xs uppercase tracking-widest text-graphite tabular">
-          QR ONSITE CHECK-IN
-        </p>
-      </section>
     </div>
   );
 }
+
 
 export function OwnerAdminPage() {
-  const { branchId: routeBranchId } = useParams<{ branchId?: string }>();
-
-  if (!routeBranchId) {
-    return <ClientPortfolioView />;
-  }
-
-  return <BranchSetupView branchId={routeBranchId} />;
+  const { branchId } = useParams<{ branchId?: string }>();
+  return branchId ? <BranchSetupView branchId={branchId} /> : <ClientPortfolioView />;
 }

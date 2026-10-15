@@ -43,6 +43,17 @@ function mockShellFetch(): Mock {
       });
     }
 
+    if (url.includes('/api/client/branches/')) {
+      return Response.json({
+        branchId: 'branch-pho-d1', branchName: 'Phở 24 — Nguyễn Huệ', address: '56 Nguyễn Huệ', district: 'Quận 1',
+        routingMode: 'PARTY_SIZE', tvSlug: 'pho-24-nh', merchantName: 'Phở 24', merchantSlug: 'pho-24',
+        industryType: 'RESTAURANT', planTier: 'PRO', buckets: [],
+        wallet: { balanceVnd: 0, messages: 0, daysLeft: null, low: true, sharedAcrossBrand: true }, ledger: [],
+        vietQr: { accountNumber: '0123456789', bankCode: 'VCB', bankName: 'Vietcombank', accountName: 'PHỞ 24' },
+        vietQrMemo: 'LUOTDI pho-24',
+      });
+    }
+
     if (url.includes('/api/admin/config')) {
       return Response.json({
         merchantId: 'merchant-pho24',
@@ -112,9 +123,9 @@ describe('merchant shell routes', () => {
     renderShell('/admin/branch-pho-d1');
 
     await waitFor(() => {
-      expect(screen.getByTestId('bucket-editor').closest('[data-page="owner-admin"]')).toBeTruthy();
+      expect(screen.getByTestId('bucket-editor').closest('[data-page="client-branch"]')).toBeTruthy();
       expect(
-        document.querySelector('[data-page="owner-admin"]'),
+        document.querySelector('[data-page="client-branch"]'),
       ).toBeInTheDocument();
     });
   });
