@@ -1,4 +1,5 @@
-import { useNavigate } from 'react-router-dom';
+import { Navigate, useNavigate } from 'react-router-dom';
+import { devHeadersEnabled, homeFor, readStaffSession } from '../auth/staffSession';
 import { BeVe, type BeVePose } from '@luotdi/design-d';
 import '../modules/host-pos/call-console.css';
 import '../components/r4.css';
@@ -15,6 +16,10 @@ const DOORS: Door[] = [
 /** Dev-only role door (M0). Production signs in with Zalo and redirects by role. */
 export function HomePage() {
   const navigate = useNavigate();
+  if (!devHeadersEnabled()) {
+    const s = readStaffSession();
+    return <Navigate to={s ? homeFor(s.staff) : '/login'} replace />;
+  }
   return (
     <div className="d-root" data-page="home" style={{ minHeight: '100vh', background: '#f6f4ea', display: 'grid', placeItems: 'center', padding: 24 }}>
       <div style={{ display: 'grid', gap: 22, justifyItems: 'center', width: 'min(1000px, 100%)' }}>
@@ -40,7 +45,8 @@ export function HomePage() {
             </section>
           ))}
         </div>
-        <span className="r4-sc r4-sc-y">Chỉ hiện ở bản thử nghiệm · bản thật đăng nhập bằng Zalo và vào thẳng trang theo vai trò</span>
+        <span className="r4-sc r4-sc-y">Chỉ hiện ở bản thử nghiệm · bản thật đăng nhập bằng email và vào thẳng trang theo vai trò</span>
+        <button type="button" className="d-pill" onClick={() => navigate('/login')}>Đăng nhập bằng email</button>
       </div>
     </div>
   );

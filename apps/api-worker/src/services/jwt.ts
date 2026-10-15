@@ -107,3 +107,81 @@ export async function readGuestBearer(
   const claims = await verifyGuestJwt(secret, m[1]!.trim());
   return claims ? { kind: 'ok', claims } : { kind: 'invalid' };
 }
+
+// ── Staff sessions ─────────────────────────────────────────────────────────
+// Same HS256 key, but a distinct `typ: 'staff'` claim and no `zid`, so a guest
+// token can never act as staff and a staff token never passes verifyGuestJwt.
+
+export type StaffRole = 'PLATFORM_ADMIN' | 'CLIENT_ADMIN' | 'BRANCH_MANAGER';
+export type StaffClaims = {
+  typ: 'staff';
+  sub: string;
+  role: StaffRole;
+  clientId?: string | null;
+  branchIds?: string[];
+  email?: string;
+  iat: number;
+  exp: number;
+};
+export const STAFF_JWT_TTL_SECONDS = 12 * 60 * 60;
+
+export async function signStaffJwt(
+  secret: string,
+  claims: Omit<StaffClaims, 'typ' | 'iat' | 'exp'>,
+  nowMs = Date.now(),
+  ttlSeconds = STAFF_JWT_TTL_SECONDS,
+): Promise<string> {
+  const iat = Math.floor(nowMs / 1000);
+  const header = b64url(enc.encode(JSON.stringify({ alg: 'HS256', typ: 'JWT' })));
+  const payload = b64url(enc.encode(JSON.stringify({ ...claims, typ: 'staff', iat, exp: iat + ttlSeconds })));
+  const data = `${header}.${payload}`;
+  const sig = await crypto.subtle.sign('HMAC', await hmacKey(secret), enc.encode(data));
+  return `${data}.${b64url(new Uint8Array(sig))}`;
+}
+
+export async function verifyStaffJwt(secret: string, token: string, nowMs = Date.now()): Promise<StaffClaims | null> {
+  const parts = token.split('.');
+  if (parts.length !== 3) return null;
+  const [h, p, s] = parts as [string, string, string];
+  try {
+    const header = JSON.parse(new TextDecoder().decode(b64urlDecode(h))) as { alg?: string };
+    if (header.alg !== 'HS256') return null;
+    const ok = await crypto.subtle.verify('HMAC', await hmacKey(secret), b64urlDecode(s), enc.encode(`${h}.${p}`));
+    if (!ok) return null;
+    const c = JSON.parse(new TextDecoder().decode(b64urlDecode(p))) as StaffClaims;
+    if (c.typ !== 'staff' || typeof c.sub !== 'string') return null;
+    if (c.role !== 'PLATFORM_ADMIN' && c.role !== 'CLIENT_ADMIN' && c.role !== 'BRANCH_MANAGER') return null;
+    if (typeof c.exp !== 'number' || c.exp * 1000 <= nowMs) return null;
+    return c;
+  } catch {
+    return null;
+  }
+}
+
+// ── Staff passwords: PBKDF2-SHA256, stored as pbkdf2$<iter>$<salt>$<hash> ──
+const PBKDF2_ITER = 100_000;
+
+async function pbkdf2(password: string, salt: Uint8Array, iter: number): Promise<Uint8Array> {
+  const key = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations: iter }, key, 256);
+  return new Uint8Array(bits);
+}
+
+export async function hashPassword(password: string, iter = PBKDF2_ITER): Promise<string> {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  return `pbkdf2$${iter}$${b64url(salt)}$${b64url(await pbkdf2(password, salt, iter))}`;
+}
+
+/** Constant-time compare; any non-pbkdf2 value (e.g. the seed placeholder) never matches. */
+export async function verifyPassword(password: string, stored: string): Promise<boolean> {
+  const m = /^pbkdf2\$(\d+)\$([\w-]+)\$([\w-]+)$/.exec(stored);
+  if (!m) return false;
+  const iter = Number(m[1]);
+  if (!Number.isFinite(iter) || iter < 1000 || iter > 1_000_000) return false;
+  const want = b64urlDecode(m[3]!);
+  const got = await pbkdf2(password, b64urlDecode(m[2]!), iter);
+  if (got.length !== want.length) return false;
+  let diff = 0;
+  for (let i = 0; i < got.length; i++) diff |= got[i]! ^ want[i]!;
+  return diff === 0;
+}

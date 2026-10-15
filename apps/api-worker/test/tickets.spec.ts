@@ -371,7 +371,8 @@ describe('POST /api/tickets — concurrency-safe issuance', () => {
 
   it('GET /api/branches/:id/snapshot includes bucket tabs, stats strip and ticket source', async () => {
     await postTicket({ branchId: BRANCH_ID, paxCount: 2, customerName: 'Walk', source: 'HOST_MANUAL' });
-    const res = await SELF.fetch(`http://localhost/api/branches/${BRANCH_ID}/snapshot`);
+    expect((await SELF.fetch(`http://localhost/api/branches/${BRANCH_ID}/snapshot`)).status).toBe(401);
+    const res = await SELF.fetch(`http://localhost/api/branches/${BRANCH_ID}/snapshot`, { headers: { 'X-Test-Staff-Role': 'BRANCH_HOST' } });
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       buckets: { prefix: string; minPax: number; maxPax: number }[];

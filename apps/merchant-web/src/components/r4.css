@@ -99,3 +99,7 @@
   .cc-rail, .r4-no-print, .cc-top { display: none !important; }
   .cc-app { background: #fff; }
 }
+.r4-input { width: 100%; box-sizing: border-box; border: 2.5px solid var(--d-line); border-radius: 14px; padding: 10px 12px; font: 600 15px var(--d-font-body); background: #fff; }
+.r4-input:focus { outline: 3px solid var(--d-yellow, #f6e84a); outline-offset: 1px; }
+.r4-err { margin: 0; color: var(--d-hot, #d6452b); font: 600 13.5px var(--d-font-body); }
+.r4-logout { position: fixed; right: 12px; bottom: 12px; z-index: 50; font-size: 12px; }

@@ -4,7 +4,7 @@ import type { Env } from '../index';
 import {
   assertBranchAccess,
   HostQueueService,
-  readActor,
+  resolveActor,
   znsSenderFromEnv,
 } from '../services';
 
@@ -19,7 +19,7 @@ function apiError(error: string, code: string) {
 }
 
 host.patch('/tickets/:id/action', async (c) => {
-  const actorResult = readActor(c.req.raw.headers);
+  const actorResult = await resolveActor(c.req.raw.headers, c.env);
   if (!actorResult.ok) {
     return c.json(apiError('Staff authentication required', actorResult.code), 401);
   }

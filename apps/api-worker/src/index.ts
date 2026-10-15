@@ -26,6 +26,8 @@ export type Env = {
   ZALO_APP_SECRET?: string;
   /** HS256 key for guest JWTs. */
   JWT_SECRET?: string;
+  /** vitest only: trust X-Test-Staff-Role / X-Dev-Actor headers. Never set in deployed envs. */
+  TEST_TRUST_STAFF_HEADERS?: string;
   /** Zalo OA access token used for ZNS (business.openapi.zalo.me). */
   ZALO_OA_ACCESS_TOKEN?: string;
   /** Approved ZNS template id for "approaching turn". */

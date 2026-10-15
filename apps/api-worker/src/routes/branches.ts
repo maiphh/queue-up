@@ -1,7 +1,7 @@
 import { calculateEstimatedWait } from '@luotdi/shared';
 import { Hono } from 'hono';
 import type { Env } from '../index';
-import { assertBranchAccess, pauseReason, readActor } from '../services';
+import { assertBranchAccess, pauseReason, resolveActor } from '../services';
 import { readGuestBearer } from '../services/jwt';
 
 /**
@@ -430,10 +430,19 @@ branches.get('/:branchId/tv', async (c) => {
 
 /** GET /api/branches/:branchId/snapshot — Host POS */
 branches.get('/:branchId/snapshot', async (c) => {
+  // Staff only: the snapshot carries guest names and masked phones.
+  const actorResult = await resolveActor(c.req.raw.headers, c.env);
+  if (!actorResult.ok) {
+    return c.json(apiError('Staff authentication required', actorResult.code), 401);
+  }
   const branchId = c.req.param('branchId');
   const branch = await loadBranchById(c.env.DB, branchId);
   if (!branch) {
     return c.json({ error: 'Branch not found', code: 'BRANCH_NOT_FOUND' }, 404);
+  }
+  const snapAccess = await assertBranchAccess(c.env.DB, actorResult.actor, branchId);
+  if (snapAccess !== true) {
+    return c.json(apiError('Insufficient staff role', snapAccess.code), snapAccess.status);
   }
 
   const ticketResult = await c.env.DB.prepare(
@@ -512,7 +521,7 @@ branches.get('/:branchId/snapshot', async (c) => {
 
 /** POST /api/branches/:branchId/pause — toggle pause */
 branches.post('/:branchId/pause', async (c) => {
-  const actorResult = readActor(c.req.raw.headers);
+  const actorResult = await resolveActor(c.req.raw.headers, c.env);
   if (!actorResult.ok) {
     return c.json(apiError('Staff authentication required', actorResult.code), 401);
   }

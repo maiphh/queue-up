@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { Env } from '../index';
 import type { Context } from 'hono';
 import { buildVietQrMemo } from '@luotdi/shared';
-import { assertBranchAccess, readActor } from '../services';
+import { assertBranchAccess, resolveActor } from '../services';
 import { vnDate } from './manage';
 
 const ZNS_PRICE_VND = 400;
@@ -18,7 +18,7 @@ function apiError(error: string, code: string) {
 
 /** GET /api/client/portfolio — CLIENT_ADMIN for X-Dev-Client-Id */
 client.get('/portfolio', async (c) => {
-  const actorResult = readActor(c.req.raw.headers);
+  const actorResult = await resolveActor(c.req.raw.headers, c.env);
   if (!actorResult.ok) {
     return c.json(apiError('Staff authentication required', actorResult.code), 401);
   }
@@ -123,7 +123,7 @@ client.get('/portfolio', async (c) => {
 // ───────────── Branch setup (M3): buckets + brand wallet ─────────────
 
 async function gateBranch(c: Context<{ Bindings: Env }>) {
-  const r = readActor(c.req.raw.headers);
+  const r = await resolveActor(c.req.raw.headers, c.env);
   if (!r.ok) return c.json(apiError('Staff authentication required', r.code), 401);
   // Buckets + wallet belong to the brand owner: Client (or Platform Admin), not the branch manager.
   if (r.actor.role === 'BRANCH_MANAGER') return c.json(apiError('Insufficient staff role', 'FORBIDDEN'), 403);

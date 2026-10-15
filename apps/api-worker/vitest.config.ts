@@ -19,6 +19,8 @@ export default defineWorkersConfig({
             TEST_SCHEMA_SQL: schemaSql,
             // Pin prod: a developer's local .dev.vars (ENVIRONMENT=dev) must not leak in.
             ENVIRONMENT: 'production',
+            // Lets the existing specs keep using X-Test-Staff-Role. Never set in wrangler.toml.
+            TEST_TRUST_STAFF_HEADERS: '1',
             JWT_SECRET: 'test-jwt-secret-0123456789abcdef',
             ZALO_APP_SECRET: 'test-zalo-app-secret',
           },

@@ -69,6 +69,13 @@ Ids below that already load with `db:reset` stay. `client-an-tam`, `client-cafe`
 
 The current mock set includes merchants (PRO restaurant, FREE cafe, PRO clinic), buckets, live WAITING/CALLED tickets, staff users, and a sample wallet ledger.
 
+## Staff auth (Admin / Client / Manager)
+
+- `POST /api/auth/staff { email, password }` returns a 12h HS256 staff JWT (`typ: "staff"`, role, clientId or branchIds). merchant-web keeps it in `sessionStorage` and sends `Authorization: Bearer …`; staff pages redirect to `/login` without one.
+- Passwords are PBKDF2-SHA256. Set one with `pnpm --filter api-worker -s staff:hash '<password>'`, then `UPDATE staff_users SET password_hash='<hash>' WHERE email='…'`. The seed's placeholder hashes never log in.
+- `X-Dev-Actor` / `X-Test-Staff-Role` headers are trusted **only** when `ENVIRONMENT=dev` (local `.dev.vars`) or `TEST_TRUST_STAFF_HEADERS=1` (set in the vitest configs only, never in `wrangler.toml`). Dev bypass: the role door / dev actor switch, or `POST /api/auth/staff/dev { email }` (404 outside dev).
+- Guests: `GET /api/tickets/:id` and `POST /api/tickets/:id/cancel` need the guest JWT, and only the ticket's owner gets a 200 (others get 404).
+
 ## Zalo Mini App deployment
 
 ### Guest app env (`apps/zalo-mini-app/.env`, see `.env.example`)

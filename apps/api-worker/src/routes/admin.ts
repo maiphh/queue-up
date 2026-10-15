@@ -4,7 +4,7 @@ import {
 } from '@luotdi/shared';
 import { Hono } from 'hono';
 import type { Env } from '../index';
-import { assertBranchAccess, readActor } from '../services';
+import { assertBranchAccess, resolveActor } from '../services';
 import { LOW_WALLET_VND } from './client';
 import { vnDate } from './manage';
 
@@ -77,7 +77,7 @@ async function uniqueQrToken(db: D1Database, base: string): Promise<string> {
 
 /** GET /api/admin/overview — PLATFORM_ADMIN only */
 admin.get('/overview', async (c) => {
-  const actorResult = readActor(c.req.raw.headers);
+  const actorResult = await resolveActor(c.req.raw.headers, c.env);
   if (!actorResult.ok) {
     return c.json(apiError('Staff authentication required', actorResult.code), 401);
   }
@@ -206,7 +206,7 @@ admin.get('/overview', async (c) => {
 
 /** POST /api/admin/clients — PLATFORM_ADMIN onboard */
 admin.post('/clients', async (c) => {
-  const actorResult = readActor(c.req.raw.headers);
+  const actorResult = await resolveActor(c.req.raw.headers, c.env);
   if (!actorResult.ok) {
     return c.json(apiError('Staff authentication required', actorResult.code), 401);
   }
@@ -325,7 +325,7 @@ admin.post('/clients', async (c) => {
 
 /** GET /api/admin/config?branchId= */
 admin.get('/config', async (c) => {
-  const actorResult = readActor(c.req.raw.headers);
+  const actorResult = await resolveActor(c.req.raw.headers, c.env);
   if (!actorResult.ok) {
     return c.json(apiError('Staff authentication required', actorResult.code), 401);
   }
@@ -418,7 +418,7 @@ admin.get('/config', async (c) => {
 
 /** POST /api/admin/buckets — upsert bucket (dev-friendly) */
 admin.post('/buckets', async (c) => {
-  const actorResult = readActor(c.req.raw.headers);
+  const actorResult = await resolveActor(c.req.raw.headers, c.env);
   if (!actorResult.ok) {
     return c.json(apiError('Staff authentication required', actorResult.code), 401);
   }

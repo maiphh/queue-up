@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { Env } from '../index';
-import { readActor } from '../services';
+import { resolveActor } from '../services';
 
 const superAdmin = new Hono<{ Bindings: Env }>();
 
@@ -8,12 +8,14 @@ function apiError(error: string, code: string) {
   return { error, code };
 }
 
-function requirePlatformAdmin(c: {
+async function requirePlatformAdmin(c: {
   req: { raw: { headers: Headers } };
-}):
+  env: Env;
+}): Promise<
   | { ok: true }
-  | { ok: false; status: 401 | 403; body: { error: string; code: string } } {
-  const actorResult = readActor(c.req.raw.headers);
+  | { ok: false; status: 401 | 403; body: { error: string; code: string } }
+> {
+  const actorResult = await resolveActor(c.req.raw.headers, c.env);
   if (!actorResult.ok) {
     return {
       ok: false,
@@ -33,7 +35,7 @@ function requirePlatformAdmin(c: {
 
 /** GET /api/super-admin/branches */
 superAdmin.get('/branches', async (c) => {
-  const gate = requirePlatformAdmin(c);
+  const gate = await requirePlatformAdmin(c);
   if (!gate.ok) return c.json(gate.body, gate.status);
 
   const result = await c.env.DB.prepare(
@@ -70,7 +72,7 @@ superAdmin.get('/branches', async (c) => {
 
 /** POST /api/super-admin/branches/:id/impersonate — ack only (UI navigates) */
 superAdmin.post('/branches/:id/impersonate', async (c) => {
-  const gate = requirePlatformAdmin(c);
+  const gate = await requirePlatformAdmin(c);
   if (!gate.ok) return c.json(gate.body, gate.status);
 
   const id = c.req.param('id');
@@ -85,7 +87,7 @@ superAdmin.post('/branches/:id/impersonate', async (c) => {
 
 /** PATCH /api/super-admin/merchants/:id/plan */
 superAdmin.patch('/merchants/:id/plan', async (c) => {
-  const gate = requirePlatformAdmin(c);
+  const gate = await requirePlatformAdmin(c);
   if (!gate.ok) return c.json(gate.body, gate.status);
 
   const id = c.req.param('id');
@@ -112,7 +114,7 @@ superAdmin.patch('/merchants/:id/plan', async (c) => {
 
 /** POST /api/super-admin/branches/:id/force-clear — cancel open tickets */
 superAdmin.post('/branches/:id/force-clear', async (c) => {
-  const gate = requirePlatformAdmin(c);
+  const gate = await requirePlatformAdmin(c);
   if (!gate.ok) return c.json(gate.body, gate.status);
 
   const id = c.req.param('id');

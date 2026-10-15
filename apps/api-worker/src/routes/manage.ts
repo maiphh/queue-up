@@ -1,6 +1,6 @@
 import { Hono, type Context } from 'hono';
 import type { Env } from '../index';
-import { assertBranchAccess, isValidHhmm, readActor } from '../services';
+import { assertBranchAccess, isValidHhmm, resolveActor } from '../services';
 
 /**
  * Round 4 · Manager sub-pages (`/manage/:branchId/{history,reports,qr,settings}`).
@@ -18,7 +18,7 @@ function apiError(error: string, code: string) {
 }
 
 async function gate(c: C): Promise<Response | null> {
-  const actor = readActor(c.req.raw.headers);
+  const actor = await resolveActor(c.req.raw.headers, c.env);
   if (!actor.ok) return c.json(apiError('Staff authentication required', actor.code), 401);
   const branchId = c.req.param('branchId')!;
   const exists = await c.env.DB.prepare(`SELECT id FROM branches WHERE id = ?1`).bind(branchId).first();

@@ -19,6 +19,8 @@ export {
 
 export {
   readActor,
+  resolveActor,
+  staffHeadersTrusted,
   assertBranchAccess,
   type Actor,
 } from './actor';
