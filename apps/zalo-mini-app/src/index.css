@@ -7,7 +7,7 @@ body { margin: 0; background: var(--d-cream); }
 
 /* Guest app layout (Style D). Primitives live in @luotdi/design-d/styles.css. */
 .zma-shell { min-height: 100vh; display: flex; flex-direction: column; }
-.zma-header { height: 46px; display: flex; align-items: center; gap: 10px; padding: 0 14px; font: 700 17px var(--d-font-display); }
+.zma-header { position: relative; z-index: 2; height: 46px; display: flex; align-items: center; gap: 10px; padding: 0 14px; font: 700 17px var(--d-font-display); }
 .zma-header button { background: none; border: 0; font-size: 22px; color: inherit; cursor: pointer; }
 .zma-page { flex: 1; padding: 6px 18px 22px; display: flex; flex-direction: column; gap: 14px; position: relative; }
 .zma-center { align-items: center; text-align: center; justify-content: flex-start; padding-top: 32px; }
