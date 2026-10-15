@@ -12,6 +12,7 @@ import {
   TabularMetric,
 } from '@luotdi/ui-braun';
 import { useQueueSocket } from '../hooks/useQueueSocket';
+import { apiFetch } from '../lib/api';
 
 type TicketPayload = {
   id: string;
@@ -38,7 +39,7 @@ export function LivePassPage() {
 
     void (async () => {
       try {
-        const res = await fetch(`/api/tickets/${ticketId}`);
+        const res = await apiFetch(`/api/tickets/${ticketId}`);
         if (!res.ok) {
           if (!cancelled) setError('Không tìm thấy số.');
           return;

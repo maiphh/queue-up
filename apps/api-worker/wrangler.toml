@@ -7,10 +7,22 @@ compatibility_flags = ["nodejs_compat"]
 [triggers]
 crons = ["0 21 * * *"]
 
+[vars]
+# "dev" enables POST /api/auth/dev (browser-only login). Override per env.
+ENVIRONMENT = "dev"
+
+# Secrets — set with `wrangler secret put <NAME>` (locally: .dev.vars, git-ignored):
+#   ZALO_APP_SECRET              Zalo App secret (appsecret_proof for graph.zalo.me)
+#   JWT_SECRET                   HS256 key for guest JWTs (>= 32 random bytes)
+#   ZALO_OA_ACCESS_TOKEN         OA access token for ZNS (expires; rotate)
+#   ZNS_TEMPLATE_APPROACHING_ID  approved ZNS template id ("approaching turn")
+#   ZNS_DEVELOPMENT_MODE         optional, "1" = send ZNS with mode=development
+
 [[d1_databases]]
 binding = "DB"
 database_name = "luotdi-db"
 database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
 
 [durable_objects]
 bindings = [

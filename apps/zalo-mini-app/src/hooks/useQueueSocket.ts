@@ -5,6 +5,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { WsServerEvent } from '@luotdi/shared';
+import { wsUrl } from '../lib/api';
 
 export type UseQueueSocketOptions = {
   branchId?: string;
@@ -16,9 +17,8 @@ export type UseQueueSocketResult = {
   connected: boolean;
 };
 
-function wsUrlForBranch(branchId: string): string {
-  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  return `${proto}//${window.location.host}/api/branches/${branchId}/ws`;
+export function wsUrlForBranch(branchId: string): string {
+  return wsUrl(`/api/branches/${encodeURIComponent(branchId)}/ws`);
 }
 
 export function useQueueSocket(

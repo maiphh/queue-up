@@ -69,6 +69,30 @@ Ids below that already load with `db:reset` stay. `client-an-tam`, `client-cafe`
 
 The current mock set includes merchants (PRO restaurant, FREE cafe, PRO clinic), buckets, live WAITING/CALLED tickets, staff users, and a sample wallet ledger.
 
+## Zalo Mini App deployment
+
+### Guest app env (`apps/zalo-mini-app/.env`, see `.env.example`)
+
+| Var | Purpose |
+|-----|---------|
+| `VITE_API_BASE` | Absolute Worker origin (e.g. `https://api.luotdi.vn`). Required for Zalo builds — the app runs on `https://h5.zdn.vn`, so relative `/api` calls would hit Zalo. Empty in `pnpm dev` (Vite proxy). Fetch + WebSocket URLs both derive from it. |
+
+### Worker secrets (`wrangler secret put <NAME>`; locally in `apps/api-worker/.dev.vars`)
+
+| Name | Purpose |
+|------|---------|
+| `ZALO_APP_SECRET` | Zalo App secret; `appsecret_proof` for `graph.zalo.me/v2.0/me` |
+| `JWT_SECRET` | HS256 key for guest session JWTs (≥ 32 random bytes) |
+| `ZALO_OA_ACCESS_TOKEN` | OA access token for ZNS (`business.openapi.zalo.me/message/template`). Expires — rotate. |
+| `ZNS_TEMPLATE_APPROACHING_ID` | Approved ZNS template id for "approaching turn" (params: `ticket_number`, `parties_ahead`, `branch_name`) |
+| `ZNS_DEVELOPMENT_MODE` | Optional, `1` sends ZNS with `mode: "development"` |
+
+Vars: `ENVIRONMENT` (`dev` enables `POST /api/auth/dev`; set it to `production` in prod), `CORS_EXTRA_ORIGINS` (comma list, e.g. the `zmp start` preview URL). CORS always allows `https://h5.zdn.vn`.
+
+D1 migration: `wrangler d1 migrations apply luotdi-db --remote` (adds `guest_users`).
+
+Auth flow: `getAccessToken()` → `POST /api/auth/zalo { accessToken }` → `{ token }` → `Authorization: Bearer <token>` on `POST /api/tickets`. The ticket's `zalo_user_id` comes only from the JWT.
+
 ## Workspace
 
 - `apps/api-worker` — Cloudflare Worker API

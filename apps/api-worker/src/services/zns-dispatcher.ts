@@ -15,6 +15,9 @@
  *    skip deduct/send (`skippedReason: ALREADY_SENT`).
  * 5. If wallet < 400: skip ZNS and ledger debit (`INSUFFICIENT_WALLET`);
  *    WebSocket-only fallback is out of scope for this service.
+ * 6. With a real sender: no phone on file for the guest → `NO_RECIPIENT`
+ *    (no charge). If the ZNS call fails, the debit + ledger row are rolled
+ *    back (`SEND_FAILED`) so a later retry can use the same dedupe key.
  */
 
 import {
@@ -25,6 +28,8 @@ import {
 } from '@luotdi/shared';
 
 export type ZnsSender = {
+  /** When true, tickets without a guest phone are skipped before charging. */
+  readonly requiresRecipient?: boolean;
   sendApproachingTurn(payload: ZnsApproachingDispatch): Promise<void>;
 };
 
@@ -34,6 +39,8 @@ type TicketContext = {
   bucket_id: string;
   display_number: string;
   merchant_id: string;
+  branch_name: string | null;
+  phone: string | null;
 };
 
 export class ZnsDispatcherService {
@@ -111,6 +118,14 @@ export class ZnsDispatcherService {
         notifiedTicketId: ticket.id,
         charged: false,
         skippedReason: 'ALREADY_SENT',
+      };
+    }
+
+    if (this.sender?.requiresRecipient && !ticket.phone) {
+      return {
+        notifiedTicketId: ticket.id,
+        charged: false,
+        skippedReason: 'NO_RECIPIENT',
       };
     }
 
@@ -200,8 +215,27 @@ export class ZnsDispatcherService {
         displayNumber: ticket.display_number,
         partiesAhead: 2,
         at: createdAt,
+        ...(ticket.phone ? { phone: ticket.phone } : {}),
+        ...(ticket.branch_name ? { branchName: ticket.branch_name } : {}),
       };
-      await this.sender.sendApproachingTurn(payload);
+      try {
+        await this.sender.sendApproachingTurn(payload);
+      } catch {
+        // Refund: undo debit + ledger so the dedupe key is free for a retry.
+        await this.db.batch([
+          this.db
+            .prepare(
+              `UPDATE merchants SET wallet_balance_vnd = wallet_balance_vnd + ? WHERE id = ?`,
+            )
+            .bind(ZNS_APPROACHING_FEE_VND, ticket.merchant_id),
+          this.db.prepare(`DELETE FROM wallet_ledger WHERE id = ?`).bind(ledgerId),
+        ]);
+        return {
+          notifiedTicketId: ticket.id,
+          charged: false,
+          skippedReason: 'SEND_FAILED',
+        };
+      }
     }
 
     return {
@@ -215,9 +249,13 @@ export class ZnsDispatcherService {
   ): Promise<TicketContext | null> {
     return this.db
       .prepare(
-        `SELECT t.id, t.branch_id, t.bucket_id, t.display_number, b.merchant_id
+        `SELECT t.id, t.branch_id, t.bucket_id, t.display_number, b.merchant_id,
+                b.name AS branch_name,
+                g.phone_e164 AS phone
          FROM tickets t
          JOIN branches b ON b.id = t.branch_id
+         LEFT JOIN guest_users g
+           ON g.zalo_user_id = t.zalo_user_id AND g.deleted_at IS NULL
          WHERE t.id = ?`,
       )
       .bind(ticketId)

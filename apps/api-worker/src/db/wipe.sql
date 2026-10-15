@@ -6,6 +6,7 @@ DROP TABLE IF EXISTS tickets;
 DROP TABLE IF EXISTS staff_branch_assignments;
 DROP TABLE IF EXISTS queue_buckets;
 DROP TABLE IF EXISTS branches;
+DROP TABLE IF EXISTS guest_users;
 DROP TABLE IF EXISTS staff_users;
 DROP TABLE IF EXISTS merchants;
 DROP TABLE IF EXISTS clients;

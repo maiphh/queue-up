@@ -12,6 +12,7 @@ import {
   KeycapButton,
   TabularMetric,
 } from '@luotdi/ui-braun';
+import { apiFetch } from '../lib/api';
 
 type MarketplaceBranch = {
   id: string;
@@ -55,7 +56,7 @@ export function MarketplacePage() {
 
     void (async () => {
       try {
-        const res = await fetch('/api/branches');
+        const res = await apiFetch('/api/branches');
         if (!res.ok) {
           if (!cancelled) setError('Không tải được danh sách.');
           return;

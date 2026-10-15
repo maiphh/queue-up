@@ -63,7 +63,7 @@ export const CreateTicketRequestSchema = z.object({
   paxCount: z.number().int().positive().optional(),
   /** Required for SERVICE_TYPE routing. */
   bucketId: z.string().min(1).optional(),
-  zaloUserId: z.string().min(1).optional(),
+  /** Guest identity is derived server-side from the Bearer JWT — never sent by the client. */
   customerName: z.string().min(1),
   source: TicketSourceSchema.optional(),
 });
@@ -266,6 +266,10 @@ export const ZnsApproachingDispatchSchema = z.object({
   displayNumber: z.string().min(1),
   partiesAhead: z.literal(2),
   at: z.number().int().positive(),
+  /** Recipient phone (E.164 or 84xxxxxxxxx). Resolved server-side when a real sender is wired. */
+  phone: z.string().min(1).optional(),
+  /** Branch name for the ZNS template, when available. */
+  branchName: z.string().min(1).optional(),
 });
 export type ZnsApproachingDispatch = z.infer<typeof ZnsApproachingDispatchSchema>;
 
@@ -273,6 +277,10 @@ export const ApproachingTurnSkipReasonSchema = z.enum([
   'INSUFFICIENT_WALLET',
   'NO_CANDIDATE',
   'ALREADY_SENT',
+  /** Real sender configured but no phone on file for the guest — no charge. */
+  'NO_RECIPIENT',
+  /** ZNS API call failed — wallet debit and ledger row rolled back. */
+  'SEND_FAILED',
 ]);
 export type ApproachingTurnSkipReason = z.infer<
   typeof ApproachingTurnSkipReasonSchema

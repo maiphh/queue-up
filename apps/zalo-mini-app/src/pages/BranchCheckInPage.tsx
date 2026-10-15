@@ -15,10 +15,12 @@ import {
   TabularMetric,
 } from '@luotdi/ui-braun';
 import { useZaloIdentity } from '../hooks/useZaloIdentity';
+import { apiFetch } from '../lib/api';
 
 type BranchBucket = {
   id: string;
   prefix: string;
+  labelVi?: string;
   minPax: number;
   maxPax: number;
   partiesWaiting: number;
@@ -45,12 +47,14 @@ function matchBucket(
 export function BranchCheckInPage() {
   const { qrToken } = useParams<{ qrToken: string }>();
   const navigate = useNavigate();
-  const { zaloUserId, customerName, ready } = useZaloIdentity();
+  const identity = useZaloIdentity();
+  const { customerName, ready } = identity;
 
   const [branch, setBranch] = useState<BranchPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [paxCount, setPaxCount] = useState<SegmentedMatrixValue>(2);
   const [issuing, setIssuing] = useState(false);
+  const [serviceBucketId, setServiceBucketId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!qrToken) return;
@@ -58,7 +62,7 @@ export function BranchCheckInPage() {
 
     void (async () => {
       try {
-        const res = await fetch(`/api/branches/by-qr/${qrToken}`);
+        const res = await apiFetch(`/api/branches/by-qr/${encodeURIComponent(qrToken)}`);
         if (!res.ok) {
           if (!cancelled) setError('Không tìm thấy chi nhánh.');
           return;
@@ -75,22 +79,33 @@ export function BranchCheckInPage() {
     };
   }, [qrToken]);
 
-  const matched = useMemo(
-    () => (branch ? matchBucket(branch.buckets, paxCount) : undefined),
-    [branch, paxCount],
-  );
+  const isServiceType = branch?.routingMode === 'SERVICE_TYPE';
+
+  // PARTY_SIZE: bucket by pax. SERVICE_TYPE: the guest picks a service
+  // (default first) — pax ranges are meaningless there (e.g. clinic 1–1).
+  const matched = useMemo(() => {
+    if (!branch) return undefined;
+    if (branch.routingMode === 'SERVICE_TYPE') {
+      return (
+        branch.buckets.find((b) => b.id === serviceBucketId) ?? branch.buckets[0]
+      );
+    }
+    return matchBucket(branch.buckets, paxCount);
+  }, [branch, paxCount, serviceBucketId]);
 
   const issuePass = useCallback(async () => {
     if (!branch || !ready || issuing) return;
     setIssuing(true);
     try {
-      const res = await fetch('/api/tickets', {
+      // Identity travels as the Bearer JWT (apiFetch); never in the body.
+      const res = await apiFetch('/api/tickets', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           branchId: branch.id,
-          paxCount,
-          zaloUserId,
+          ...(isServiceType && matched
+            ? { bucketId: matched.id, paxCount: 1 }
+            : { paxCount }),
           customerName,
         }),
       });
@@ -110,7 +125,8 @@ export function BranchCheckInPage() {
     ready,
     issuing,
     paxCount,
-    zaloUserId,
+    isServiceType,
+    matched,
     customerName,
     navigate,
   ]);
@@ -143,10 +159,33 @@ export function BranchCheckInPage() {
       </header>
 
       <GridCell label="01">
-        <p className="mb-2 font-sans text-sm text-carbon">
-          {guestCopy.partySize}
-        </p>
-        <SegmentedMatrix value={paxCount} onChange={setPaxCount} />
+        {isServiceType ? (
+          <>
+            <p className="mb-2 font-sans text-sm text-carbon">
+              {guestCopy.chooseService}
+            </p>
+            <div className="flex flex-wrap gap-2" role="radiogroup">
+              {branch.buckets.map((b) => (
+                <KeycapButton
+                  key={b.id}
+                  role="radio"
+                  aria-checked={matched?.id === b.id}
+                  variant={matched?.id === b.id ? 'danger' : 'secondary'}
+                  onClick={() => setServiceBucketId(b.id)}
+                >
+                  {b.labelVi ?? b.prefix}
+                </KeycapButton>
+              ))}
+            </div>
+          </>
+        ) : (
+          <>
+            <p className="mb-2 font-sans text-sm text-carbon">
+              {guestCopy.partySize}
+            </p>
+            <SegmentedMatrix value={paxCount} onChange={setPaxCount} />
+          </>
+        )}
       </GridCell>
 
       <GridCell label="02">
@@ -160,7 +199,12 @@ export function BranchCheckInPage() {
               {matched.prefix}
             </span>
           ) : (
-            <span className="font-mono text-sm text-graphite">—</span>
+            <span
+              data-testid="no-bucket"
+              className="font-sans text-sm text-graphite"
+            >
+              {guestCopy.noBucketForParty}
+            </span>
           )}
           {matched ? (
             <TabularMetric
@@ -175,14 +219,26 @@ export function BranchCheckInPage() {
         <p className="font-mono text-xs text-signal-orange">{error}</p>
       ) : null}
 
+      {identity.status === 'error' ? (
+        <div data-testid="identity-error" className="flex items-center gap-3">
+          <p className="font-sans text-xs text-signal-orange">
+            {guestCopy.authFailed}
+          </p>
+          <KeycapButton variant="secondary" onClick={identity.retry}>
+            {guestCopy.retry}
+          </KeycapButton>
+        </div>
+      ) : null}
+
       <KeycapButton
         variant="primary"
         disabled={!ready || issuing || !matched}
+        aria-busy={identity.status === 'loading' || issuing || undefined}
         onClick={() => {
           void issuePass();
         }}
       >
-        {guestCopy.issuePass}
+        {identity.status === 'loading' ? guestCopy.signingIn : guestCopy.issuePass}
       </KeycapButton>
     </BraunChassis>
   );

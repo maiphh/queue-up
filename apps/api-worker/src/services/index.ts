@@ -22,3 +22,10 @@ export {
   assertBranchAccess,
   type Actor,
 } from './actor';
+
+export {
+  ZaloZnsSender,
+  ZnsSendError,
+  toZnsPhone,
+  znsSenderFromEnv,
+} from './zns-sender';

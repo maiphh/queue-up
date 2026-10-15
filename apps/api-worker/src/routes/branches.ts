@@ -201,6 +201,7 @@ branches.get('/by-qr/:qrToken', async (c) => {
     bucketPayload.push({
       id: bucket.id,
       prefix: bucket.prefix,
+      labelVi: bucket.label_vi,
       minPax: bucket.min_pax,
       maxPax: bucket.max_pax,
       partiesWaiting: live.partiesWaiting,

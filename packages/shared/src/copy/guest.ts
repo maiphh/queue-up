@@ -11,4 +11,9 @@ export const guestCopy = {
   ahead: 'Phía trước',
   estWait: 'Chờ khoảng',
   proceed: 'Mời vào quầy',
+  chooseService: 'Chọn dịch vụ',
+  signingIn: 'Đang xác thực…',
+  authFailed: 'Không xác thực được tài khoản Zalo.',
+  retry: 'Thử lại',
+  noBucketForParty: 'Chưa nhận nhóm cỡ này. Vui lòng hỏi nhân viên.',
 } as const;

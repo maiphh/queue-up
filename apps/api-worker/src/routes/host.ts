@@ -1,7 +1,12 @@
 import { HostTicketActionRequestSchema } from '@luotdi/shared';
 import { Hono } from 'hono';
 import type { Env } from '../index';
-import { assertBranchAccess, HostQueueService, readActor } from '../services';
+import {
+  assertBranchAccess,
+  HostQueueService,
+  readActor,
+  znsSenderFromEnv,
+} from '../services';
 
 /**
  * Host queue mutations.
@@ -51,7 +56,11 @@ host.patch('/tickets/:id/action', async (c) => {
     return c.json(apiError('Insufficient staff role', access.code), access.status);
   }
 
-  const service = new HostQueueService(c.env.DB, c.env.BRANCH_QUEUE_ROOM);
+  const service = new HostQueueService(
+    c.env.DB,
+    c.env.BRANCH_QUEUE_ROOM,
+    znsSenderFromEnv(c.env),
+  );
   const result = await service.applyAction(ticketId, parsed.data);
 
   if (!result.ok) {

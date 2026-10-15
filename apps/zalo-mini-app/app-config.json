@@ -2,6 +2,7 @@
   "app": {
     "title": "LượtĐi",
     "headerColor": "#111111",
-    "textColor": "white"
+    "textColor": "white",
+    "actionBarHidden": true
   }
 }
