@@ -6,12 +6,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { guestCopy } from '@luotdi/shared';
-import {
-  BraunChassis,
-  GridCell,
-  KeycapButton,
-  TabularMetric,
-} from '@luotdi/ui-braun';
+import { BeVe } from '@luotdi/design-d';
 import { apiFetch } from '../lib/api';
 
 type MarketplaceBranch = {
@@ -79,66 +74,46 @@ export function MarketplacePage() {
   }, [branches, category]);
 
   return (
-    <BraunChassis className="m-4 flex flex-col gap-3 p-4">
-      <header>
-        <h1 className="font-sans text-xl font-semibold text-carbon">
-          {guestCopy.marketplaceTitle}
-        </h1>
+    <section className="zma-page" data-screen="marketplace">
+      <header className="zma-row">
+        <BeVe pose="idle" size={48} />
+        <h1 className="d-lx zma-h1">{guestCopy.marketplaceTitle}</h1>
       </header>
 
-      <div className="flex flex-wrap gap-2" role="group" aria-label="Category">
+      <div className="zma-row zma-wrap" role="group" aria-label="Category">
         {CATEGORIES.map((value) => (
-          <KeycapButton
+          <button
             key={value}
-            variant={category === value ? 'primary' : 'secondary'}
-            className="min-h-[40px] px-3 text-xs"
+            type="button"
+            aria-pressed={category === value}
+            className={category === value ? 'd-chip d-chip-navy' : 'd-chip'}
             onClick={() => setCategory(value)}
           >
             {FILTER_LABEL[value]}
-          </KeycapButton>
+          </button>
         ))}
       </div>
 
-      {error ? (
-        <p className="font-mono text-xs text-signal-orange">{error}</p>
-      ) : null}
+      {error ? <p className="zma-warn">{error}</p> : null}
 
-      <ul
-        data-testid="marketplace-branch-list"
-        className="flex list-none flex-col gap-2 p-0"
-      >
+      <ul data-testid="marketplace-branch-list" className="zma-list">
         {filtered.map((branch) => (
           <li key={branch.id}>
-            <GridCell label={CATEGORY_LABEL[branch.category] ?? branch.category}>
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="font-sans text-sm font-semibold text-carbon">
-                    {branch.name}
-                  </p>
-                  <p className="mt-0.5 font-mono text-[10px] uppercase tracking-widest text-graphite tabular">
-                    {branch.district}
-                  </p>
-                </div>
-                <div className="flex flex-col items-end gap-1">
-                  <span className="font-mono text-[10px] tracking-widest text-graphite">
-                    {guestCopy.waiting}
-                  </span>
-                  <TabularMetric
-                    size="lg"
-                    value={String(branch.waitingCount)}
-                  />
-                </div>
+            <Link to={`/b/${branch.qrToken ?? branch.id}`} className="d-card zma-row zma-between" style={{ textDecoration: 'none', color: 'inherit' }}>
+              <div>
+                <small className="d-muted">{CATEGORY_LABEL[branch.category] ?? branch.category}</small>
+                <p className="d-lx" style={{ margin: 0, fontWeight: 700 }}>{branch.name}</p>
+                <small className="d-muted">{branch.district}</small>
               </div>
-              <Link
-                to={`/b/${branch.qrToken ?? branch.id}`}
-                className="mt-2 inline-block font-mono text-[10px] tracking-widest text-carbon underline"
-              >
-                Vào
-              </Link>
-            </GridCell>
+              <div style={{ textAlign: 'right' }}>
+                <b className="d-num" style={{ fontSize: 28 }}>{branch.waitingCount}</b>
+                <br />
+                <small className="d-muted">{guestCopy.waiting}</small>
+              </div>
+            </Link>
           </li>
         ))}
       </ul>
-    </BraunChassis>
+    </section>
   );
 }

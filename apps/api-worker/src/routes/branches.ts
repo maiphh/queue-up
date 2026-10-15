@@ -55,6 +55,7 @@ type TicketRow = {
   created_at: number;
   called_at: number | null;
   held_at: number | null;
+  source?: string;
 };
 
 function marketplaceCategory(
@@ -209,7 +210,9 @@ branches.get('/by-qr/:qrToken', async (c) => {
     });
   }
 
+  const waitingTotal = await countWaiting(c.env.DB, branch.id);
   return c.json({
+    waitingCount: waitingTotal,
     id: branch.id,
     name: branch.name,
     district: branch.district,
@@ -309,7 +312,7 @@ branches.get('/:branchId/snapshot', async (c) => {
 
   const ticketResult = await c.env.DB.prepare(
     `SELECT id, display_number, status, bucket_id, pax_count, customer_name,
-            priority_boost, created_at, called_at, held_at
+            priority_boost, created_at, called_at, held_at, source
      FROM tickets
      WHERE branch_id = ?1
        AND status IN ('WAITING', 'CALLED', 'HELD')
@@ -331,6 +334,8 @@ branches.get('/:branchId/snapshot', async (c) => {
     priorityBoost: t.priority_boost,
     createdAt: t.created_at,
     calledAt: t.called_at,
+    heldAt: t.held_at,
+    source: t.source ?? 'QR_ONSITE',
   }));
 
   const waiting = tickets.filter((t) => t.status === 'WAITING');
@@ -342,7 +347,34 @@ branches.get('/:branchId/snapshot', async (c) => {
     avgWaitMins = Math.round(sum / waiting.length);
   }
 
+  // Call Console extras: bucket tabs + stats strip.
+  const bucketRows = await loadBuckets(c.env.DB, branch.id);
+  const today = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Ho_Chi_Minh', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date());
+  const dayStats = await c.env.DB.prepare(
+    `SELECT
+       SUM(CASE WHEN status = 'SEATED' THEN 1 ELSE 0 END) AS served,
+       SUM(CASE WHEN status = 'CANCELLED' THEN 1 ELSE 0 END) AS cancelled
+     FROM tickets WHERE branch_id = ?1 AND ticket_date = ?2`,
+  )
+    .bind(branchId, today)
+    .first<{ served: number | null; cancelled: number | null }>();
+
   return c.json({
+    buckets: bucketRows.map((b) => ({
+      id: b.id,
+      prefix: b.prefix,
+      labelVi: b.label_vi,
+      minPax: b.min_pax,
+      maxPax: b.max_pax,
+    })),
+    stats: {
+      servedToday: dayStats?.served ?? 0,
+      cancelledToday: dayStats?.cancelled ?? 0,
+      walletBalanceVnd: branch.wallet_balance_vnd,
+    },
+    graceMins: branch.grace_period_mins,
     branchId: branch.id,
     branchName: branch.name,
     waitingCount,

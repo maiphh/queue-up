@@ -23,7 +23,7 @@ export type ZaloIdentity = {
 };
 
 const TOKEN_KEY = 'luotdi.session';
-/** SDK/bridge calls must not hang the UI forever. */
+/** One overall budget for the whole sign-in (SDK + Worker exchange). */
 export const IDENTITY_TIMEOUT_MS = 10_000;
 
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
@@ -84,20 +84,21 @@ async function exchange(path: string, body: unknown): Promise<AuthResponse> {
   return (await res.json()) as AuthResponse;
 }
 
-async function signIn(): Promise<AuthResponse> {
+async function signInSteps(): Promise<AuthResponse> {
   let accessToken: string | null = null;
   try {
-    accessToken = await withTimeout(getAccessToken(), IDENTITY_TIMEOUT_MS);
+    accessToken = await getAccessToken();
   } catch {
     accessToken = null;
   }
-  if (accessToken) {
-    return withTimeout(exchange('/api/auth/zalo', { accessToken }), IDENTITY_TIMEOUT_MS);
-  }
-  if (import.meta.env.DEV) {
-    return withTimeout(exchange('/api/auth/dev', {}), IDENTITY_TIMEOUT_MS);
-  }
+  if (accessToken) return exchange('/api/auth/zalo', { accessToken });
+  if (import.meta.env.DEV) return exchange('/api/auth/dev', {});
   throw new Error('no zalo access token');
+}
+
+/** Whole sign-in shares a single 10s deadline (not 10s per step). */
+export function signIn(timeoutMs = IDENTITY_TIMEOUT_MS): Promise<AuthResponse> {
+  return withTimeout(signInSteps(), timeoutMs);
 }
 
 export function useZaloIdentity(): ZaloIdentity {

@@ -86,8 +86,9 @@ tickets.get('/:id', async (c) => {
   const id = c.req.param('id');
   const row = await c.env.DB.prepare(
     `SELECT t.id, t.display_number, t.status, t.branch_id, t.bucket_id,
-            t.pax_count, t.created_at, t.priority_boost,
-            b.name AS branch_name,
+            t.pax_count, t.created_at, t.priority_boost, t.called_at,
+            b.name AS branch_name, b.grace_period_mins, b.is_paused,
+            bk.prefix AS bucket_prefix, bk.label_vi AS bucket_label_vi,
             bk.active_counters, bk.rolling_turnover_mins
      FROM tickets t
      JOIN branches b ON b.id = t.branch_id
@@ -104,7 +105,12 @@ tickets.get('/:id', async (c) => {
       pax_count: number;
       created_at: number;
       priority_boost: number;
+      called_at: number | null;
       branch_name: string;
+      grace_period_mins: number;
+      is_paused: number;
+      bucket_prefix: string;
+      bucket_label_vi: string;
       active_counters: number;
       rolling_turnover_mins: number;
     }>();
@@ -159,6 +165,11 @@ tickets.get('/:id', async (c) => {
     branchName: row.branch_name,
     bucketId: row.bucket_id,
     paxCount: row.pax_count,
+    bucketPrefix: row.bucket_prefix,
+    bucketLabelVi: row.bucket_label_vi,
+    calledAt: row.called_at,
+    graceMins: row.grace_period_mins,
+    isPaused: row.is_paused === 1,
     nowServing: nowServingRow?.display_number ?? '—',
     partiesAhead,
     estimatedWaitMins,

@@ -354,4 +354,31 @@ describe('POST /api/tickets — concurrency-safe issuance', () => {
     });
     expect(bad.headers.get('Access-Control-Allow-Origin')).toBeNull();
   });
+
+  it('GET /api/tickets/:id exposes bucket prefix, calledAt, grace and pause for the guest screens', async () => {
+    const res = await postTicket({ branchId: BRANCH_ID, paxCount: 2, customerName: 'Screens' });
+    const { id } = CreateTicketResponseSchema.parse(await res.json());
+    const got = await SELF.fetch(`http://localhost/api/tickets/${id}`);
+    expect(got.status).toBe(200);
+    const body = (await got.json()) as Record<string, unknown>;
+    expect(body).toMatchObject({ bucketPrefix: 'A', calledAt: null, isPaused: false });
+    expect(typeof body.graceMins).toBe('number');
+  });
+
+  it('GET /api/branches/:id/snapshot includes bucket tabs, stats strip and ticket source', async () => {
+    await postTicket({ branchId: BRANCH_ID, paxCount: 2, customerName: 'Walk', source: 'HOST_MANUAL' });
+    const res = await SELF.fetch(`http://localhost/api/branches/${BRANCH_ID}/snapshot`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      buckets: { prefix: string; minPax: number; maxPax: number }[];
+      stats: { servedToday: number; cancelledToday: number; walletBalanceVnd: number };
+      tickets: { source: string }[];
+      graceMins: number;
+    };
+    expect(body.buckets.map((b) => b.prefix)).toEqual(['A', 'B', 'C']);
+    expect(body.stats).toMatchObject({ servedToday: 0, cancelledToday: 0 });
+    expect(typeof body.stats.walletBalanceVnd).toBe('number');
+    expect(body.tickets[0]?.source).toBe('HOST_MANUAL');
+    expect(typeof body.graceMins).toBe('number');
+  });
 });

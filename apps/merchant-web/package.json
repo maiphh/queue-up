@@ -11,6 +11,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@luotdi/design-d": "workspace:*",
     "@luotdi/shared": "workspace:*",
     "@luotdi/ui-braun": "workspace:*",
     "react": "^19.1.1",

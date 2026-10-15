@@ -24,18 +24,13 @@ function Header() {
   const location = useLocation();
   const canGoBack = location.key !== 'default';
   return (
-    <header className="flex items-center gap-3 border-b border-grid bg-ink px-4 py-3 text-panel">
+    <header className="zma-header">
       {canGoBack ? (
-        <button
-          type="button"
-          aria-label="Quay lại"
-          className="font-mono text-sm"
-          onClick={() => navigate(-1)}
-        >
-          ←
+        <button type="button" aria-label="Quay lại" onClick={() => navigate(-1)}>
+          ‹
         </button>
       ) : null}
-      <h1 className="font-mono text-sm tracking-widest tabular">LUOTDI</h1>
+      <span>LượtĐi</span>
     </header>
   );
 }
@@ -43,7 +38,7 @@ function Header() {
 export function App({ initialPath }: { initialPath?: string } = {}) {
   return (
     <MemoryRouter initialEntries={[initialPath ?? resolveInitialRoute()]}>
-      <main className="min-h-screen bg-chassis text-carbon font-sans">
+      <main className="d-root zma-shell">
         <Header />
         <Routes>
           <Route path="/" element={<MarketplacePage />} />
