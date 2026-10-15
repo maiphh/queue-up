@@ -57,6 +57,9 @@ importers:
 
   apps/merchant-web:
     dependencies:
+      '@luotdi/design-d':
+        specifier: workspace:*
+        version: link:../../packages/design-d
       '@luotdi/shared':
         specifier: workspace:*
         version: link:../../packages/shared

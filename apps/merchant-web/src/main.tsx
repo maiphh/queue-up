@@ -2,6 +2,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import { installActorFetch } from './dev/installActorFetch';
+import '@luotdi/design-d/styles.css';
 import './index.css';
 
 installActorFetch();

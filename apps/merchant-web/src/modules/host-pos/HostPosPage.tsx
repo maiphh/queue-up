@@ -1,29 +1,22 @@
 /**
- * Manager floor — `/host/:branchId` (and `/manage/:branchId` via redirect).
- * Top metrics, pinned CALLED strip, waiting rows + Thêm drawer.
+ * Manager floor — Call Console (Style D "Tươi & Nổi", round 3 Layout A).
+ * `/manage/:branchId` (and `/host/:branchId` via redirect).
+ *
+ * Primary: Đang mời + big GỌI SỐ TIẾP (Space). Secondary: called-not-arrived
+ * list, waiting table with Bàn tabs + wait colours. Tertiary: stats strip.
+ * Bé Vé appears ONLY in the empty state, the call toast, and the paused banner.
+ * Shortcuts: Space call next · ↵ đã đến · H giữ chỗ · Z hoàn tác · N khách đến quầy.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useParams } from 'react-router-dom';
-import { managerCopy } from '@luotdi/shared';
-import {
-  BraunChassis,
-  GridCell,
-  KeycapButton,
-  LedIndicator,
-  TabularMetric,
-} from '@luotdi/ui-braun';
-import {
-  DEV_ACTOR_STORAGE_KEY,
-  readDevActor,
-} from '../../dev/actor';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useParams } from 'react-router-dom';
+import { managerCopy as m } from '@luotdi/shared';
+import { BeVe, callPress, mascotPop, numberFlip, rowCollapse, toastIn } from '@luotdi/design-d';
+import './call-console.css';
+import { DEV_ACTOR_STORAGE_KEY, readDevActor } from '../../dev/actor';
+import { useQueueSocket } from '../../hooks/useQueueSocket';
 
-type HostTicketStatus =
-  | 'WAITING'
-  | 'CALLED'
-  | 'HELD'
-  | 'SEATED'
-  | 'CANCELLED';
+type HostTicketStatus = 'WAITING' | 'CALLED' | 'HELD' | 'SEATED' | 'CANCELLED';
 
 type HostTicket = {
   id: string;
@@ -35,7 +28,11 @@ type HostTicket = {
   priorityBoost: number;
   createdAt: number;
   calledAt: number | null;
+  heldAt?: number | null;
+  source?: string;
 };
+
+type SnapshotBucket = { id: string; prefix: string; labelVi?: string; minPax: number; maxPax: number };
 
 type HostSnapshot = {
   branchId: string;
@@ -45,20 +42,45 @@ type HostSnapshot = {
   queueStatus: 'OPEN' | 'PAUSED' | 'CLOSED' | string;
   isPaused: boolean;
   tickets: HostTicket[];
-  /** Present only when the snapshot already includes it. */
   industryType?: string;
+  buckets?: SnapshotBucket[];
+  graceMins?: number;
+  stats?: { servedToday: number; cancelledToday: number; walletBalanceVnd: number };
 };
+
+/** Deferred SUMMON so "Hoàn tác" is a real undo (nothing has been sent yet). */
+export const UNDO_WINDOW_MS = 4000;
+const POLL_MS = 15_000;
 
 const ACTION_ERROR = 'Không thực hiện được thao tác.';
 const LOAD_ERROR = 'Không tải được hàng chờ.';
 const WALK_IN_ERROR = 'Không tạo được số.';
 
 function showAdminViewBanner(): boolean {
-  // Avoid readDevActor() when unset — it persists PLATFORM_ADMIN and would
-  // always show the banner in tests with empty sessionStorage.
   if (sessionStorage.getItem(DEV_ACTOR_STORAGE_KEY) == null) return false;
   return readDevActor().role === 'PLATFORM_ADMIN';
 }
+
+const prefixOf = (t: HostTicket) => t.displayNumber.charAt(0);
+const minsSince = (ts: number, now: number) => Math.max(0, Math.floor((now - ts) / 60_000));
+function mmss(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+/** Wait colour: ≥16′ hot, ≥12′ warm (round-3 admin board). */
+export function waitTone(mins: number): 'h' | 'm' | 'n' {
+  return mins >= 16 ? 'h' : mins >= 12 ? 'm' : 'n';
+}
+const vnd = (n: number) => `${n.toLocaleString('vi-VN')}đ`;
+
+function isTyping(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  if (!el) return false;
+  const tag = el.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable;
+}
+
+type Pending = { ticket: HostTicket; at: number; timer: ReturnType<typeof setTimeout> };
 
 export function HostPosPage() {
   const { branchId } = useParams<{ branchId: string }>();
@@ -71,6 +93,18 @@ export function HostPosPage() {
   const [walkInSubmitting, setWalkInSubmitting] = useState(false);
   const [drawerTicketId, setDrawerTicketId] = useState<string | null>(null);
   const [adminBanner] = useState(() => showAdminViewBanner());
+  const [tab, setTab] = useState<string>('ALL');
+  const [query, setQuery] = useState('');
+  const [now, setNow] = useState(() => Date.now());
+  const [pending, setPending] = useState<Pending | null>(null);
+  const pendingRef = useRef<Pending | null>(null);
+  pendingRef.current = pending;
+
+  const callBtnRef = useRef<HTMLButtonElement>(null);
+  const servingNumRef = useRef<HTMLDivElement>(null);
+  const toastRef = useRef<HTMLDivElement>(null);
+  const emptyMascotRef = useRef<HTMLDivElement>(null);
+  const pausedMascotRef = useRef<HTMLDivElement>(null);
 
   const loadSnapshot = useCallback(async () => {
     if (!branchId) return;
@@ -80,8 +114,7 @@ export function HostPosPage() {
         setError(LOAD_ERROR);
         return;
       }
-      const data = (await res.json()) as HostSnapshot;
-      setSnapshot(data);
+      setSnapshot((await res.json()) as HostSnapshot);
       setError(null);
     } catch {
       setError(LOAD_ERROR);
@@ -92,30 +125,156 @@ export function HostPosPage() {
     void loadSnapshot();
   }, [loadSnapshot]);
 
-  const waitingTickets = useMemo(
-    () => (snapshot?.tickets ?? []).filter((t) => t.status === 'WAITING'),
-    [snapshot],
+  const { connected } = useQueueSocket({ branchId, role: 'HOST', onEvent: () => void loadSnapshot() });
+  useEffect(() => {
+    if (connected) return;
+    const t = setInterval(() => void loadSnapshot(), POLL_MS);
+    return () => clearInterval(t);
+  }, [connected, loadSnapshot]);
+
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const postTicketAction = useCallback(
+    async (ticketId: string, action: string, extra: Record<string, unknown> = {}) => {
+      setActionError(null);
+      try {
+        const res = await fetch(`/api/host/tickets/${ticketId}/action`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', 'X-Test-Staff-Role': 'BRANCH_HOST' },
+          body: JSON.stringify({ action, ...extra }),
+        });
+        if (!res.ok) {
+          setActionError(ACTION_ERROR);
+          return false;
+        }
+        setDrawerTicketId(null);
+        await loadSnapshot();
+        return true;
+      } catch {
+        setActionError(ACTION_ERROR);
+        return false;
+      }
+    },
+    [loadSnapshot],
   );
 
-  const calledTickets = useMemo(
-    () => (snapshot?.tickets ?? []).filter((t) => t.status === 'CALLED'),
-    [snapshot],
+  // ── Derived lists (pending call is shown optimistically) ─────────────
+  const tickets = useMemo(() => {
+    const list = snapshot?.tickets ?? [];
+    if (!pending) return list;
+    return list.map((t) => (t.id === pending.ticket.id ? { ...t, status: 'CALLED' as const, calledAt: pending.at } : t));
+  }, [snapshot, pending]);
+
+  const waiting = useMemo(() => tickets.filter((t) => t.status === 'WAITING'), [tickets]);
+  const held = useMemo(() => tickets.filter((t) => t.status === 'HELD'), [tickets]);
+  const called = useMemo(
+    () => tickets.filter((t) => t.status === 'CALLED').sort((a, b) => (b.calledAt ?? 0) - (a.calledAt ?? 0)),
+    [tickets],
+  );
+  const serving = pending ? called.find((t) => t.id === pending.ticket.id) ?? called[0] : called[0];
+  const calledNotArrived = useMemo(
+    () => [...called.filter((t) => t.id !== serving?.id), ...held],
+    [called, held, serving],
+  );
+  const nextUp = waiting[0];
+
+  const buckets: SnapshotBucket[] = useMemo(() => {
+    if (snapshot?.buckets?.length) return snapshot.buckets;
+    const seen = new Map<string, SnapshotBucket>();
+    for (const t of snapshot?.tickets ?? []) {
+      const p = prefixOf(t);
+      if (!seen.has(p)) seen.set(p, { id: t.bucketId, prefix: p, minPax: 0, maxPax: 0 });
+    }
+    return [...seen.values()].sort((a, b) => a.prefix.localeCompare(b.prefix));
+  }, [snapshot]);
+
+  const rows = useMemo(() => {
+    const base = tab === 'HELD' ? held : tab === 'ALL' ? waiting : waiting.filter((t) => t.bucketId === tab || prefixOf(t) === tab);
+    const q = query.trim().toLowerCase();
+    return q ? base.filter((t) => t.customerName.toLowerCase().includes(q) || t.displayNumber.toLowerCase().includes(q)) : base;
+  }, [tab, held, waiting, query]);
+
+  const isClinic = snapshot?.industryType === 'CLINIC' || snapshot?.industryType === 'HOSPITAL';
+  const changeLabel = isClinic ? m.changeService : m.changeParty;
+  const guestNoun = isClinic ? m.patientNoun : m.guestNoun;
+  const isPaused = Boolean(snapshot && (snapshot.isPaused || snapshot.queueStatus === 'PAUSED'));
+  const grace = (snapshot?.graceMins ?? 3) * 60_000;
+  const tableOf = (t: HostTicket) => `Bàn ${prefixOf(t)}`;
+  const sourceLabel = (t: HostTicket) => (t.source === 'HOST_MANUAL' ? m.sourceCounter : m.sourceZalo);
+
+  // ── Call next with undo window ───────────────────────────────────────
+  const commitPending = useCallback(
+    (p: Pending | null) => {
+      if (!p) return;
+      clearTimeout(p.timer);
+      setPending(null);
+      void postTicketAction(p.ticket.id, 'SUMMON');
+    },
+    [postTicketAction],
   );
 
-  const drawerTicket = useMemo(
-    () => waitingTickets.find((t) => t.id === drawerTicketId) ?? null,
-    [waitingTickets, drawerTicketId],
+  const callTicket = useCallback(
+    async (t: HostTicket | undefined) => {
+      if (!t || isPaused) {
+        if (!t) setActionError(m.nothingToCall);
+        return;
+      }
+      commitPending(pendingRef.current); // one pending call at a time
+      callPress(callBtnRef.current);
+      const row = document.querySelector(`[data-testid="waiting-row-${t.id}"]`);
+      const anim = rowCollapse(row);
+      if (anim?.finished) await anim.finished.catch(() => undefined);
+      const timer = setTimeout(() => {
+        if (pendingRef.current?.ticket.id === t.id) commitPending(pendingRef.current);
+      }, UNDO_WINDOW_MS);
+      setPending({ ticket: t, at: Date.now(), timer });
+    },
+    [isPaused, commitPending],
   );
 
-  const isClinicOrHospital =
-    snapshot?.industryType === 'CLINIC' ||
-    snapshot?.industryType === 'HOSPITAL';
-  const changeLabel = isClinicOrHospital
-    ? managerCopy.changeService
-    : managerCopy.changeParty;
-  const guestNoun = isClinicOrHospital
-    ? managerCopy.patientNoun
-    : managerCopy.guestNoun;
+  const undo = useCallback(() => {
+    const p = pendingRef.current;
+    if (!p) return;
+    clearTimeout(p.timer);
+    setPending(null);
+  }, []);
+
+  // Commit (not drop) a pending call if the page unmounts.
+  useEffect(() => () => commitPending(pendingRef.current), [commitPending]);
+
+  // Motion: number flip when Đang mời changes; toast in; mascots pop once.
+  const servingId = serving?.id;
+  useEffect(() => {
+    if (servingId) numberFlip(servingNumRef.current);
+  }, [servingId]);
+  useEffect(() => {
+    if (pending) {
+      toastIn(toastRef.current);
+      mascotPop(toastRef.current?.querySelector('.be-ve'));
+    }
+  }, [pending]);
+  const empty = waiting.length === 0 && held.length === 0 && called.length === 0;
+  useEffect(() => {
+    if (empty) mascotPop(emptyMascotRef.current);
+  }, [empty]);
+  useEffect(() => {
+    if (isPaused) mascotPop(pausedMascotRef.current);
+  }, [isPaused]);
+
+  const seatServing = useCallback(() => {
+    if (!serving) return;
+    if (pendingRef.current?.ticket.id === serving.id) commitPending(pendingRef.current);
+    void postTicketAction(serving.id, 'SEAT');
+  }, [serving, commitPending, postTicketAction]);
+
+  const holdServing = useCallback(() => {
+    if (!serving) return;
+    if (pendingRef.current?.ticket.id === serving.id) commitPending(pendingRef.current);
+    void postTicketAction(serving.id, 'HOLD');
+  }, [serving, commitPending, postTicketAction]);
 
   const pauseQueue = useCallback(async () => {
     if (!branchId) return;
@@ -124,7 +283,7 @@ export function HostPosPage() {
       const res = await fetch(`/api/branches/${branchId}/pause`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ paused: !(snapshot?.isPaused ?? false) }),
+        body: JSON.stringify({ paused: !isPaused }),
       });
       if (!res.ok) {
         setActionError(ACTION_ERROR);
@@ -134,33 +293,36 @@ export function HostPosPage() {
     } catch {
       setActionError(ACTION_ERROR);
     }
-  }, [branchId, snapshot?.isPaused, loadSnapshot]);
+  }, [branchId, isPaused, loadSnapshot]);
 
-  const postTicketAction = useCallback(
-    async (ticketId: string, action: string, extra: Record<string, unknown> = {}) => {
-      setActionError(null);
-      try {
-        const res = await fetch(`/api/host/tickets/${ticketId}/action`, {
-          method: 'PATCH',
-          headers: {
-            'Content-Type': 'application/json',
-            // Local/dev staff auth until JWT lands
-            'X-Test-Staff-Role': 'BRANCH_HOST',
-          },
-          body: JSON.stringify({ action, ...extra }),
-        });
-        if (!res.ok) {
-          setActionError(ACTION_ERROR);
-          return;
-        }
-        setDrawerTicketId(null);
-        await loadSnapshot();
-      } catch {
-        setActionError(ACTION_ERROR);
+  // ── Keyboard shortcuts ───────────────────────────────────────────────
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (isTyping(e.target) || walkInOpen || drawerTicketId) return;
+      const k = e.key;
+      if (k === ' ' || e.code === 'Space') {
+        e.preventDefault();
+        void callTicket(nextUp);
+      } else if (k === 'Enter') {
+        if ((e.target as HTMLElement | null)?.tagName === 'BUTTON') return; // let focused buttons work
+        e.preventDefault();
+        seatServing();
+      } else if (k === 'h' || k === 'H') {
+        e.preventDefault();
+        holdServing();
+      } else if (k === 'z' || k === 'Z') {
+        e.preventDefault();
+        undo();
+      } else if (k === 'n' || k === 'N') {
+        e.preventDefault();
+        setActionError(null);
+        setWalkInOpen(true);
       }
-    },
-    [loadSnapshot],
-  );
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [walkInOpen, drawerTicketId, callTicket, nextUp, seatServing, holdServing, undo]);
 
   const submitWalkIn = useCallback(async () => {
     if (!branchId) return;
@@ -175,12 +337,7 @@ export function HostPosPage() {
       const res = await fetch('/api/tickets', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          branchId,
-          customerName,
-          paxCount: walkInPax,
-          source: 'HOST_MANUAL',
-        }),
+        body: JSON.stringify({ branchId, customerName, paxCount: walkInPax, source: 'HOST_MANUAL' }),
       });
       if (!res.ok) {
         setActionError(WALK_IN_ERROR);
@@ -197,325 +354,239 @@ export function HostPosPage() {
     }
   }, [branchId, walkInName, walkInPax, loadSnapshot]);
 
-  if (!branchId) {
-    return (
-      <BraunChassis className="m-4 p-4">
-        <p className="font-mono text-sm text-carbon">Thiếu chi nhánh.</p>
-      </BraunChassis>
-    );
-  }
+  const drawerTicket = useMemo(() => tickets.find((t) => t.id === drawerTicketId) ?? null, [tickets, drawerTicketId]);
 
-  if (error && !snapshot) {
-    return (
-      <BraunChassis className="m-4 p-4">
-        <p className="font-mono text-sm text-carbon">{error}</p>
-      </BraunChassis>
-    );
-  }
+  if (!branchId) return <div className="cc-msg">Thiếu chi nhánh.</div>;
+  if (error && !snapshot) return <div className="cc-msg">{error}</div>;
+  if (!snapshot) return <div className="cc-msg">Đang tải.</div>;
 
-  if (!snapshot) {
-    return (
-      <BraunChassis className="m-4 p-4">
-        <p className="font-mono text-xs text-graphite tabular">Đang tải.</p>
-      </BraunChassis>
-    );
-  }
-
-  const isPaused =
-    snapshot.isPaused ||
-    snapshot.queueStatus === 'PAUSED' ||
-    snapshot.queueStatus === managerCopy.statusPaused;
-  const statusLabel = isPaused
-    ? managerCopy.statusPaused
-    : managerCopy.statusOpen;
-  const ledState = isPaused
-    ? 'warning'
-    : snapshot.queueStatus === 'OPEN' || !isPaused
-      ? 'active'
-      : 'idle';
+  const dateLabel = new Intl.DateTimeFormat('vi-VN', {
+    timeZone: 'Asia/Ho_Chi_Minh', weekday: 'long', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
+  }).format(new Date(now));
 
   return (
-    <div
-      data-page="host-pos"
-      className="flex min-h-screen flex-col bg-chassis text-carbon"
-    >
-      {adminBanner ? (
-        <p
-          data-testid="admin-view-banner"
-          className="border-b border-grid bg-ink px-4 py-2 font-mono text-xs text-panel tabular"
-        >
-          {managerCopy.adminViewBanner}
-        </p>
-      ) : null}
+    <div data-page="host-pos" className="d-root cc-app">
+      <nav className="cc-rail" aria-label="Điều hướng">
+        <span className="cc-logo">L</span>
+        <span className="cc-nav cc-nav-on" aria-current="page"><i />{m.nav.counter}</span>
+        <Link className="cc-nav" to={`/tv/branch/${branchId}`}><i />{m.nav.tv}</Link>
+      </nav>
 
-      <header
-        data-testid="host-pos-top-bar"
-        className="flex flex-wrap items-center justify-between gap-3 border-b border-grid bg-panel px-4 py-3"
-      >
-        <div className="min-w-0">
-          <p className="font-mono text-[10px] uppercase tracking-widest text-graphite tabular">
-            {managerCopy.eyebrow}
-          </p>
-          <h1 className="truncate font-sans text-base font-semibold text-carbon">
-            {snapshot.branchName}
-          </h1>
-        </div>
+      <div className="cc-main">
+        {adminBanner ? <p data-testid="admin-view-banner" className="cc-admin">{m.adminViewBanner}</p> : null}
 
-        <div
-          data-testid="host-pos-metrics"
-          className="flex flex-wrap items-stretch gap-2"
-        >
-          <GridCell label={managerCopy.metricWaiting} className="min-w-[88px]">
-            <TabularMetric size="lg" value={String(snapshot.waitingCount)} />
-          </GridCell>
-          <GridCell label={managerCopy.metricAvgWait} className="min-w-[88px]">
-            <TabularMetric
-              size="lg"
-              value={`${snapshot.avgWaitMins} min`}
-            />
-          </GridCell>
-          <GridCell label={managerCopy.metricStatus} className="min-w-[112px]">
-            <div className="flex items-center gap-2">
-              <LedIndicator state={ledState} />
-              <span className="font-mono text-sm tracking-wide tabular">
-                {statusLabel}
-              </span>
+        <header data-testid="host-pos-top-bar" className="cc-top">
+          <div className="cc-branch">
+            <small>Chi nhánh</small>
+            <h1>{snapshot.branchName}</h1>
+          </div>
+          <span className="d-muted cc-date">{m.eyebrow} · {dateLabel}</span>
+          <span className="cc-sp" />
+          <span className={isPaused ? 'd-pill' : 'd-pill d-pill-green'} role="status">
+            <i className="cc-dot" />
+            {isPaused ? m.statusPaused : m.statusOpen}
+          </span>
+          <button type="button" className={isPaused ? 'd-pill d-pill-go' : 'd-pill'} onClick={() => void pauseQueue()}>
+            {isPaused ? m.resume : m.pause}
+          </button>
+          <button type="button" className="d-pill" onClick={() => { setActionError(null); setWalkInOpen(true); }}>
+            + {m.walkIn} <kbd className="d-kbd">N</kbd>
+          </button>
+        </header>
+
+        {actionError ? <p data-testid="host-pos-action-error" className="cc-error" role="alert">{actionError}</p> : null}
+
+        {isPaused ? (
+          <div className="cc-paused" role="status" data-testid="paused-banner">
+            <BeVe ref={pausedMascotRef} pose="sleep" size={64} />
+            <p>{m.pausedBanner}</p>
+            <button type="button" className="d-pill d-pill-go" onClick={() => void pauseQueue()}>{m.resume}</button>
+          </div>
+        ) : null}
+
+        <div className="cc-cols">
+          <div className="cc-left">
+            <section className="cc-serve" aria-label={m.serving} data-testid="serving-card">
+              <div className="cc-between">
+                <span className="cc-lbl">{m.serving}</span>
+                {serving?.calledAt ? <span className="cc-ago">{m.calledAgo} {mmss(now - serving.calledAt)}</span> : null}
+              </div>
+              {serving ? (
+                <>
+                  <div className="cc-sv">
+                    <div ref={servingNumRef} className="cc-bigno" data-testid="serving-number">{serving.displayNumber}</div>
+                    <div>
+                      <b>{serving.customerName}</b>
+                      <small>{serving.paxCount} {guestNoun} · {tableOf(serving)} · {sourceLabel(serving)}</small>
+                    </div>
+                  </div>
+                  <div className="cc-acts">
+                    <button type="button" className="cc-b cc-b-g" onClick={seatServing}>{m.seat} <kbd className="d-kbd">↵</kbd></button>
+                    <button type="button" className="cc-b cc-b-ol" onClick={holdServing}>{m.hold} <kbd className="d-kbd">H</kbd></button>
+                  </div>
+                </>
+              ) : (
+                <p className="cc-sv-empty">—</p>
+              )}
+            </section>
+
+            <section className="cc-next">
+              <span className="cc-lbl d-muted">{m.next}</span>
+              {nextUp ? (
+                <div className="cc-nx">
+                  <span><b>{nextUp.displayNumber}</b> {nextUp.customerName} · {nextUp.paxCount} {guestNoun}</span>
+                  <span>chờ {minsSince(nextUp.createdAt, now)} {m.minutesShort}</span>
+                </div>
+              ) : (
+                <div className="cc-nx"><span>{m.nothingToCall}</span></div>
+              )}
+              <button
+                ref={callBtnRef}
+                type="button"
+                className="cc-call"
+                disabled={isPaused || !nextUp}
+                onClick={() => void callTicket(nextUp)}
+              >
+                {m.callNext} <kbd className="d-kbd">Space</kbd>
+              </button>
+              <div className="cc-sub3">
+                {buckets.map((b) => {
+                  const first = waiting.find((t) => t.bucketId === b.id || prefixOf(t) === b.prefix);
+                  return (
+                    <button key={b.id} type="button" disabled={isPaused || !first} onClick={() => void callTicket(first)}>
+                      {m.callNextIn(b.prefix)}
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+
+            <section className="cc-called" data-testid="summoned-strip">
+              <span className="cc-lbl d-muted">{m.calledNotArrived} ({calledNotArrived.length})</span>
+              <ul>
+                {calledNotArrived.map((t) => {
+                  const since = now - (t.heldAt ?? t.calledAt ?? now);
+                  const late = t.status === 'HELD' || since > grace;
+                  return (
+                    <li key={t.id} className="cc-cr">
+                      <span className="cc-tk">{t.displayNumber}</span>
+                      <span>{t.customerName} · {t.status === 'HELD' ? m.hold : `${t.paxCount} ${guestNoun}`}</span>
+                      <span className={late ? 'cc-tmr cc-late' : 'cc-tmr'}>{mmss(since)}{late ? ' ▲' : ''}</span>
+                      <button type="button" className="cc-rb" onClick={() => void postTicketAction(t.id, 'SEAT')}>{m.seat}</button>
+                      {t.status === 'HELD' ? (
+                        <button type="button" className="cc-rb" onClick={() => void postTicketAction(t.id, 'SUMMON')}>{m.recall}</button>
+                      ) : (
+                        <button type="button" className="cc-rb" onClick={() => void postTicketAction(t.id, 'HOLD')}>{m.hold}</button>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          </div>
+
+          <section className="cc-list" data-testid="waiting-ledger">
+            <div className="cc-between">
+              <h2>{m.queueTitle} <small>{m.queueSub(snapshot.waitingCount, snapshot.avgWaitMins)}</small></h2>
+              <input className="cc-search" type="search" aria-label={m.search} placeholder={m.search} value={query} onChange={(e) => setQuery(e.target.value)} />
             </div>
-          </GridCell>
+            <div className="cc-tabs" role="tablist">
+              <button type="button" role="tab" aria-selected={tab === 'ALL'} onClick={() => setTab('ALL')}>{m.tabAll} <em>{waiting.length}</em></button>
+              {buckets.map((b) => (
+                <button key={b.id} type="button" role="tab" aria-selected={tab === b.id} onClick={() => setTab(b.id)}>
+                  {b.maxPax ? m.tabBucket(b.prefix, b.minPax, b.maxPax) : `Bàn ${b.prefix}`}
+                  <em>{waiting.filter((t) => t.bucketId === b.id || prefixOf(t) === b.prefix).length}</em>
+                </button>
+              ))}
+              <button type="button" role="tab" aria-selected={tab === 'HELD'} onClick={() => setTab('HELD')}>{m.tabHeld} <em>{held.length}</em></button>
+            </div>
+
+            {empty ? (
+              <div className="cc-empty" data-testid="empty-state">
+                <BeVe ref={emptyMascotRef} pose="idle" size={140} />
+                <b>{m.emptyTitle}</b>
+                <p className="d-muted">{m.emptyBody}</p>
+                <div className="cc-row">
+                  <button type="button" className="d-pill" onClick={() => setWalkInOpen(true)}>+ {m.walkIn}</button>
+                  <Link className="d-pill" to={`/tv/branch/${branchId}`}>{m.printQr}</Link>
+                </div>
+              </div>
+            ) : (
+              <table className="cc-table">
+                <thead>
+                  <tr>
+                    <th>{m.colNumber}</th><th>{m.colGuest}</th><th>{m.colPax}</th><th>{m.colTable}</th><th>{m.colSource}</th><th>{m.colWaited}</th><th aria-label="Thao tác" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((t) => {
+                    const mins = minsSince(t.createdAt, now);
+                    return (
+                      <tr key={t.id} data-testid={`waiting-row-${t.id}`}>
+                        <td><span className="cc-tk">{t.displayNumber}</span></td>
+                        <td className="cc-nm">{t.customerName}</td>
+                        <td>{t.paxCount} {guestNoun}</td>
+                        <td>{tableOf(t)}</td>
+                        <td><span className={t.source === 'HOST_MANUAL' ? 'cc-src cc-src-w' : 'cc-src'}>{sourceLabel(t)}</span></td>
+                        <td><span className={`cc-wt cc-wt-${waitTone(mins)}`} data-tone={waitTone(mins)}>{mins} {m.minutesShort}</span></td>
+                        <td className="cc-rowacts">
+                          <button type="button" className="cc-rb" disabled={isPaused} onClick={() => void (t.status === 'HELD' ? postTicketAction(t.id, 'SUMMON') : callTicket(t))}>{m.summon}</button>
+                          <button type="button" className="cc-rb cc-rb-i" aria-label={m.more} onClick={() => setDrawerTicketId(t.id)}>···</button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </section>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <KeycapButton variant="secondary" onClick={() => void pauseQueue()}>
-            {isPaused ? managerCopy.resume : managerCopy.pause}
-          </KeycapButton>
-          <KeycapButton
-            variant="primary"
-            onClick={() => {
-              setActionError(null);
-              setWalkInOpen(true);
-            }}
-          >
-            {managerCopy.walkIn}
-          </KeycapButton>
+        <footer className="cc-stats" data-testid="host-pos-metrics">
+          <div className="cc-st"><b>{snapshot.waitingCount}</b>{m.statWaiting}</div>
+          <div className="cc-st"><b>{snapshot.avgWaitMins}′</b>{m.statAvg}</div>
+          <div className="cc-st"><b>{snapshot.stats?.servedToday ?? '—'}</b>{m.statServed}</div>
+          <div className="cc-st"><b>{snapshot.stats?.cancelledToday ?? '—'}</b>{m.statCancelled}</div>
+          <div className="cc-st"><b>{snapshot.stats ? vnd(snapshot.stats.walletBalanceVnd) : '—'}</b>{m.statWallet}</div>
+        </footer>
+      </div>
+
+      {pending ? (
+        <div ref={toastRef} className="cc-toast" role="status" data-testid="call-toast">
+          <BeVe pose="excited" size={44} />
+          <div><b>{m.toastCalled(pending.ticket.displayNumber, pending.ticket.customerName)}</b> · {m.toastPending}</div>
+          <button type="button" className="cc-undo" onClick={undo}>{m.undo} <kbd className="d-kbd">Z</kbd></button>
         </div>
-      </header>
-
-      {actionError ? (
-        <p
-          data-testid="host-pos-action-error"
-          className="border-b border-grid bg-panel px-4 py-2 text-sm text-carbon"
-          role="alert"
-        >
-          {actionError}
-        </p>
       ) : null}
-
-      {calledTickets.length > 0 ? (
-        <section
-          data-testid="summoned-strip"
-          className="border-b border-grid bg-ink px-4 py-3 text-panel"
-        >
-          <ul className="flex flex-col gap-2">
-            {calledTickets.map((ticket) => (
-              <li
-                key={ticket.id}
-                className="flex flex-wrap items-center justify-between gap-3 border border-grid bg-chassis/10 px-3 py-2"
-              >
-                <div className="flex min-w-0 items-baseline gap-3">
-                  <TabularMetric
-                    size="lg"
-                    value={ticket.displayNumber}
-                    className="text-panel"
-                  />
-                  <span className="truncate text-sm text-panel/80">
-                    {ticket.customerName} / {ticket.paxCount} {guestNoun}
-                  </span>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <KeycapButton
-                    variant="primary"
-                    onClick={() => void postTicketAction(ticket.id, 'SEAT')}
-                  >
-                    {managerCopy.seat}
-                  </KeycapButton>
-                  <KeycapButton
-                    variant="secondary"
-                    onClick={() => void postTicketAction(ticket.id, 'HOLD')}
-                  >
-                    {managerCopy.hold}
-                  </KeycapButton>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
-
-      <section
-        data-testid="waiting-ledger"
-        className="flex-1 overflow-auto p-4"
-      >
-        {waitingTickets.length === 0 ? (
-          <BraunChassis className="p-4">
-            <p className="font-mono text-xs text-graphite tabular">
-              Không có {guestNoun} đang chờ.
-            </p>
-          </BraunChassis>
-        ) : (
-          <ul className="flex flex-col gap-2">
-            {waitingTickets.map((ticket) => (
-              <li
-                key={ticket.id}
-                data-testid={`waiting-row-${ticket.id}`}
-                className="flex flex-wrap items-center justify-between gap-3 border border-grid bg-panel px-3 py-2"
-              >
-                <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                  <TabularMetric size="lg" value={ticket.displayNumber} />
-                  <span className="truncate text-sm text-graphite">
-                    {ticket.customerName} / {ticket.paxCount} {guestNoun}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <KeycapButton
-                    variant="primary"
-                    onClick={() => void postTicketAction(ticket.id, 'SUMMON')}
-                  >
-                    {managerCopy.summon}
-                  </KeycapButton>
-                  <KeycapButton
-                    variant="secondary"
-                    aria-label={managerCopy.more}
-                    onClick={() => setDrawerTicketId(ticket.id)}
-                  >
-                    {managerCopy.more}
-                  </KeycapButton>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
 
       {drawerTicket ? (
-        <div
-          className="fixed inset-0 z-40 flex items-end justify-end bg-ink/40 sm:items-center sm:justify-center"
-          role="presentation"
-          onClick={() => setDrawerTicketId(null)}
-        >
-          <div
-            data-testid="row-action-drawer"
-            role="dialog"
-            aria-label={managerCopy.more}
-            className="w-full max-w-sm border border-grid bg-panel p-4 sm:w-96"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <p className="font-mono text-[10px] uppercase tracking-widest text-graphite tabular">
-              {drawerTicket.displayNumber}
-            </p>
-            <div className="mt-3 flex flex-col gap-2">
-              <KeycapButton
-                variant="secondary"
-                onClick={() =>
-                  void postTicketAction(drawerTicket.id, 'BUMP_PRIORITY')
-                }
-              >
-                {managerCopy.bump}
-              </KeycapButton>
-              <KeycapButton
-                variant="secondary"
-                onClick={() =>
-                  void postTicketAction(drawerTicket.id, 'CHANGE_BUCKET', {
-                    paxCount: Math.min(12, drawerTicket.paxCount + 1),
-                  })
-                }
-              >
-                {changeLabel}
-              </KeycapButton>
-              <KeycapButton
-                variant="danger"
-                onClick={() =>
-                  void postTicketAction(drawerTicket.id, 'CANCEL')
-                }
-              >
-                {managerCopy.cancel}
-              </KeycapButton>
-              <KeycapButton
-                variant="secondary"
-                onClick={() => setDrawerTicketId(null)}
-              >
-                {managerCopy.close}
-              </KeycapButton>
-            </div>
+        <div className="cc-overlay" role="presentation" onClick={() => setDrawerTicketId(null)}>
+          <div data-testid="row-action-drawer" role="dialog" aria-label={m.more} className="cc-dialog" onClick={(e) => e.stopPropagation()}>
+            <p className="cc-lbl d-muted">{drawerTicket.displayNumber}</p>
+            <button type="button" className="d-pill" onClick={() => void postTicketAction(drawerTicket.id, 'BUMP_PRIORITY')}>{m.bump}</button>
+            <button type="button" className="d-pill" onClick={() => void postTicketAction(drawerTicket.id, 'CHANGE_BUCKET', { paxCount: Math.min(12, drawerTicket.paxCount + 1) })}>{changeLabel}</button>
+            <button type="button" className="d-pill cc-danger" onClick={() => void postTicketAction(drawerTicket.id, 'CANCEL')}>{m.cancel}</button>
+            <button type="button" className="d-pill" onClick={() => setDrawerTicketId(null)}>{m.close}</button>
           </div>
         </div>
       ) : null}
 
       {walkInOpen ? (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40"
-          role="presentation"
-          onClick={() => setWalkInOpen(false)}
-        >
-          <div
-            data-testid="walk-in-modal"
-            role="dialog"
-            aria-label={managerCopy.walkIn}
-            className="w-full max-w-md border border-grid bg-panel p-4"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <p className="font-mono text-[10px] uppercase tracking-widest text-graphite tabular">
-              {managerCopy.walkIn}
-            </p>
-            <form
-              className="mt-3 flex flex-col gap-3"
-              onSubmit={(e) => {
-                e.preventDefault();
-                void submitWalkIn();
-              }}
-            >
-              <label className="flex flex-col gap-1 text-sm text-carbon">
+        <div className="cc-overlay" role="presentation" onClick={() => setWalkInOpen(false)}>
+          <div data-testid="walk-in-modal" role="dialog" aria-label={m.walkIn} className="cc-dialog" onClick={(e) => e.stopPropagation()}>
+            <p className="cc-lbl d-muted">{m.walkIn}</p>
+            <form className="cc-form" onSubmit={(e) => { e.preventDefault(); void submitWalkIn(); }}>
+              <label>
                 Tên {guestNoun}
-                <input
-                  type="text"
-                  name="customerName"
-                  value={walkInName}
-                  onChange={(e) => setWalkInName(e.target.value)}
-                  className="min-h-[48px] border border-grid bg-chassis px-3 font-sans text-sm text-carbon"
-                  autoComplete="name"
-                  required
-                />
+                <input type="text" name="customerName" value={walkInName} onChange={(e) => setWalkInName(e.target.value)} autoComplete="name" required autoFocus />
               </label>
-              <label className="flex flex-col gap-1 text-sm text-carbon">
+              <label>
                 Số {guestNoun}
-                <input
-                  type="number"
-                  name="paxCount"
-                  min={1}
-                  max={12}
-                  value={walkInPax}
-                  onChange={(e) =>
-                    setWalkInPax(
-                      Math.max(1, Math.min(12, Number(e.target.value) || 1)),
-                    )
-                  }
-                  className="min-h-[48px] border border-grid bg-chassis px-3 font-mono text-sm tabular text-carbon"
-                />
+                <input type="number" name="paxCount" min={1} max={12} value={walkInPax} onChange={(e) => setWalkInPax(Math.max(1, Math.min(12, Number(e.target.value) || 1)))} />
               </label>
-              <div className="mt-1 flex justify-end gap-2">
-                <KeycapButton
-                  variant="secondary"
-                  type="button"
-                  onClick={() => setWalkInOpen(false)}
-                >
-                  {managerCopy.close}
-                </KeycapButton>
-                <KeycapButton
-                  variant="primary"
-                  type="submit"
-                  disabled={walkInSubmitting}
-                >
-                  {managerCopy.walkIn}
-                </KeycapButton>
+              <div className="cc-row cc-end">
+                <button type="button" className="d-pill" onClick={() => setWalkInOpen(false)}>{m.close}</button>
+                <button type="submit" className="d-pill d-pill-go" disabled={walkInSubmitting}>{m.walkIn}</button>
               </div>
             </form>
           </div>
