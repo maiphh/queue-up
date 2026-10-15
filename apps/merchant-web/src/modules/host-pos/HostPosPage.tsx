@@ -295,25 +295,28 @@ export function HostPosPage() {
     }
   }, [branchId, isPaused, loadSnapshot]);
 
-  // ── Keyboard shortcuts ───────────────────────────────────────────────
+  // ── Keyboard shortcuts (one listener; reads the latest handlers via a ref) ──
+  const keyState = useRef({ walkInOpen, drawerTicketId, callTicket, nextUp, seatServing, holdServing, undo });
+  keyState.current = { walkInOpen, drawerTicketId, callTicket, nextUp, seatServing, holdServing, undo };
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      const st = keyState.current;
       if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
-      if (isTyping(e.target) || walkInOpen || drawerTicketId) return;
+      if (isTyping(e.target) || st.walkInOpen || st.drawerTicketId) return;
       const k = e.key;
       if (k === ' ' || e.code === 'Space') {
         e.preventDefault();
-        void callTicket(nextUp);
+        void st.callTicket(st.nextUp);
       } else if (k === 'Enter') {
         if ((e.target as HTMLElement | null)?.tagName === 'BUTTON') return; // let focused buttons work
         e.preventDefault();
-        seatServing();
+        st.seatServing();
       } else if (k === 'h' || k === 'H') {
         e.preventDefault();
-        holdServing();
+        st.holdServing();
       } else if (k === 'z' || k === 'Z') {
         e.preventDefault();
-        undo();
+        st.undo();
       } else if (k === 'n' || k === 'N') {
         e.preventDefault();
         setActionError(null);
@@ -322,7 +325,7 @@ export function HostPosPage() {
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [walkInOpen, drawerTicketId, callTicket, nextUp, seatServing, holdServing, undo]);
+  }, []);
 
   const submitWalkIn = useCallback(async () => {
     if (!branchId) return;
