@@ -5,6 +5,14 @@ import {
 import { Hono } from 'hono';
 import type { Env } from '../index';
 import { assertBranchAccess, readActor } from '../services';
+import { LOW_WALLET_VND } from './client';
+import { vnDate } from './manage';
+
+/** FREE plan monthly ticket cap (see POST /api/tickets FREE_QUOTA_EXCEEDED). */
+export const FREE_MONTHLY_QUOTA = 200;
+/** "Cần chú ý" flags a pause this long. */
+const LONG_PAUSE_MINS = 30;
+const TV_SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])$/;
 
 const admin = new Hono<{ Bindings: Env }>();
 
@@ -77,14 +85,19 @@ admin.get('/overview', async (c) => {
     return c.json(apiError('Insufficient staff role', 'FORBIDDEN'), 403);
   }
 
+  const now = Date.now();
+  const today = vnDate(now);
   const clientRows = await c.env.DB.prepare(
     `SELECT id, name FROM clients ORDER BY name ASC`,
   ).all<{ id: string; name: string }>();
 
+  const kpis = { waitingTotal: 0, ticketsToday: 0, pausedBranches: 0, lowWalletBrands: 0, freeNearQuota: 0, branches: 0, brands: 0 };
+  const attention: { kind: 'LOW_WALLET' | 'LONG_PAUSE' | 'SILENT'; brandId: string; branchId?: string; title: string; detail: string }[] = [];
+  let lowWalletFirst: { name: string; balanceVnd: number } | null = null;
   const clientsOut = [];
   for (const client of clientRows.results ?? []) {
     const brands = await c.env.DB.prepare(
-      `SELECT id, name, slug, industry_type, plan_tier, wallet_balance_vnd
+      `SELECT id, name, slug, industry_type, plan_tier, wallet_balance_vnd, monthly_ticket_count
        FROM merchants
        WHERE client_id = ?1
        ORDER BY name ASC`,
@@ -97,26 +110,68 @@ admin.get('/overview', async (c) => {
         industry_type: string;
         plan_tier: string;
         wallet_balance_vnd: number;
+        monthly_ticket_count: number;
       }>();
 
     const brandsOut = [];
     for (const brand of brands.results ?? []) {
+      kpis.brands += 1;
+      const walletLow = brand.wallet_balance_vnd < LOW_WALLET_VND;
+      if (walletLow) {
+        kpis.lowWalletBrands += 1;
+        lowWalletFirst ??= { name: brand.name, balanceVnd: brand.wallet_balance_vnd };
+        attention.push({
+          kind: 'LOW_WALLET', brandId: brand.id,
+          title: `${brand.name} còn ${brand.wallet_balance_vnd.toLocaleString('vi-VN')}đ ≈ ${Math.floor(brand.wallet_balance_vnd / 400)} tin Zalo`,
+          detail: 'Hết ví, khách chỉ nhận báo trong Mini App, không nhận tin Zalo',
+        });
+      }
+      if (brand.plan_tier === 'FREE' && brand.monthly_ticket_count >= FREE_MONTHLY_QUOTA * 0.8) kpis.freeNearQuota += 1;
       const branchRows = await c.env.DB.prepare(
-        `SELECT b.id, b.name, b.district, b.is_paused,
+        `SELECT b.id, b.name, b.district, b.is_paused, b.paused_at, b.slug,
                 (SELECT COUNT(*) FROM tickets t
-                 WHERE t.branch_id = b.id AND t.status = 'WAITING') AS waiting_count
+                 WHERE t.branch_id = b.id AND t.status = 'WAITING') AS waiting_count,
+                (SELECT COUNT(*) FROM tickets t
+                 WHERE t.branch_id = b.id AND t.ticket_date = ?2) AS today_count
          FROM branches b
          WHERE b.merchant_id = ?1
          ORDER BY b.name ASC`,
       )
-        .bind(brand.id)
+        .bind(brand.id, today)
         .all<{
           id: string;
           name: string;
           district: string;
           is_paused: number;
+          paused_at: number | null;
+          slug: string | null;
           waiting_count: number;
+          today_count: number;
         }>();
+
+      const rows = branchRows.results ?? [];
+      for (const b of rows) {
+        kpis.branches += 1;
+        kpis.waitingTotal += b.waiting_count;
+        kpis.ticketsToday += b.today_count;
+        if (b.is_paused === 1) {
+          kpis.pausedBranches += 1;
+          const mins = b.paused_at ? Math.floor((now - b.paused_at) / 60_000) : null;
+          if (mins == null || mins >= LONG_PAUSE_MINS) {
+            attention.push({
+              kind: 'LONG_PAUSE', brandId: brand.id, branchId: b.id,
+              title: mins == null ? `${b.name} đang tạm dừng` : `${b.name} tạm dừng ${mins} phút`,
+              detail: b.waiting_count ? `${b.waiting_count} nhóm vẫn đang giữ lượt` : 'Không còn ai trong hàng chờ',
+            });
+          }
+        } else if (b.today_count === 0) {
+          attention.push({
+            kind: 'SILENT', brandId: brand.id, branchId: b.id,
+            title: `${b.name} chưa có lượt nào hôm nay`,
+            detail: 'Kiểm tra mã QR đã in và TV đã kết nối',
+          });
+        }
+      }
 
       brandsOut.push({
         id: brand.id,
@@ -125,10 +180,14 @@ admin.get('/overview', async (c) => {
         industryType: brand.industry_type,
         planTier: brand.plan_tier,
         walletBalanceVnd: brand.wallet_balance_vnd,
-        branches: (branchRows.results ?? []).map((b) => ({
+        walletLow,
+        monthlyTicketCount: brand.monthly_ticket_count,
+        monthlyQuota: brand.plan_tier === 'FREE' ? FREE_MONTHLY_QUOTA : null,
+        branches: rows.map((b) => ({
           id: b.id,
           name: b.name,
           district: b.district,
+          slug: b.slug ?? brand.slug,
           waitingCount: b.waiting_count,
           isPaused: b.is_paused === 1,
         })),
@@ -142,7 +201,7 @@ admin.get('/overview', async (c) => {
     });
   }
 
-  return c.json({ clients: clientsOut });
+  return c.json({ kpis: { ...kpis, lowWalletFirst, freeQuota: FREE_MONTHLY_QUOTA }, attention, clients: clientsOut });
 });
 
 /** POST /api/admin/clients — PLATFORM_ADMIN onboard */
@@ -168,6 +227,23 @@ admin.post('/clients', async (c) => {
   }
 
   const data = parsed.data;
+  const extra = (body ?? {}) as { tvSlug?: unknown; graceMins?: unknown };
+  const fields: Record<string, string> = {};
+  let branchSlug: string | null = null;
+  if (extra.tvSlug !== undefined && extra.tvSlug !== null && extra.tvSlug !== '') {
+    if (typeof extra.tvSlug !== 'string' || !TV_SLUG_RE.test(extra.tvSlug)) fields.tvSlug = 'Chỉ chữ thường, số và dấu gạch (3–40 ký tự)';
+    else branchSlug = extra.tvSlug;
+  }
+  let graceMins = 10;
+  if (extra.graceMins !== undefined) {
+    if (typeof extra.graceMins !== 'number' || !Number.isInteger(extra.graceMins) || extra.graceMins < 3 || extra.graceMins > 30) fields.graceMins = 'Từ 3 đến 30 phút';
+    else graceMins = extra.graceMins;
+  }
+  if (Object.keys(fields).length) return c.json({ ...apiError('Invalid request body', 'INVALID_BODY'), fields }, 400);
+  if (branchSlug) {
+    const taken = await c.env.DB.prepare(`SELECT 1 AS x FROM branches WHERE slug = ?1`).bind(branchSlug).first();
+    if (taken) return c.json({ ...apiError('TV slug already used', 'SLUG_TAKEN'), fields: { tvSlug: 'Đường dẫn này đã có quán dùng' } }, 409);
+  }
   const now = Date.now();
   const clientId = crypto.randomUUID();
   const merchantId = crypto.randomUUID();
@@ -178,10 +254,19 @@ admin.post('/clients', async (c) => {
   const qrToken = await uniqueQrToken(c.env.DB, qrTokenFromSlug(slug));
 
   const isParty = data.routingMode === 'PARTY_SIZE';
-  const labelVi = isParty ? '01-02' : data.branchName;
-  const labelEn = isParty ? '01-02' : data.branchName;
-  const minPax = 1;
-  const maxPax = isParty ? 2 : 1;
+  // Party-size default covers every group (A 1–2 · B 3–4 · C 5–12); service mode starts with one service.
+  const bucketSeeds: [string, string, number, number][] = isParty
+    ? [['A', '1–2 khách', 1, 2], ['B', '3–4 khách', 3, 4], ['C', '5–12 khách', 5, 12]]
+    : [['A', data.branchName, 1, 1]];
+  if (!branchSlug) {
+    let candidate = `${slug}-${slugifyBrand(data.branchName).slice(0, 12)}`.replace(/-+$/, '').slice(0, 40);
+    let n = 2;
+    while (await c.env.DB.prepare(`SELECT 1 AS x FROM branches WHERE slug = ?1`).bind(candidate).first()) {
+      candidate = `${candidate.replace(/-\d+$/, '')}-${n}`;
+      n += 1;
+    }
+    branchSlug = candidate;
+  }
 
   await c.env.DB.batch([
     c.env.DB.prepare(
@@ -205,8 +290,8 @@ admin.post('/clients', async (c) => {
       `INSERT INTO branches (
          id, merchant_id, name, address, district, city,
          qr_code_token, routing_mode, allow_remote_queue, is_paused,
-         grace_period_mins, created_at
-       ) VALUES (?1, ?2, ?3, ?4, ?5, 'Ho Chi Minh', ?6, ?7, 1, 0, 10, ?8)`,
+         grace_period_mins, created_at, slug
+       ) VALUES (?1, ?2, ?3, ?4, ?5, 'Ho Chi Minh', ?6, ?7, 1, 0, ?8, ?9, ?10)`,
     ).bind(
       branchId,
       merchantId,
@@ -215,18 +300,27 @@ admin.post('/clients', async (c) => {
       data.district,
       qrToken,
       data.routingMode,
+      graceMins,
       now,
+      branchSlug,
     ),
-    c.env.DB.prepare(
-      `INSERT INTO queue_buckets (
-         id, branch_id, prefix, label_vi, label_en,
-         min_pax, max_pax, active_counters, rolling_turnover_mins,
-         current_seq, is_active
-       ) VALUES (?1, ?2, 'A', ?3, ?4, ?5, ?6, 1, 20, 0, 1)`,
-    ).bind(bucketId, branchId, labelVi, labelEn, minPax, maxPax),
+    ...bucketSeeds.map(([prefix, label, min, max], i) =>
+      c.env.DB.prepare(
+        `INSERT INTO queue_buckets (
+           id, branch_id, prefix, label_vi, label_en,
+           min_pax, max_pax, active_counters, rolling_turnover_mins,
+           current_seq, is_active
+         ) VALUES (?1, ?2, ?3, ?4, ?4, ?5, ?6, 1, 20, 0, 1)`,
+      ).bind(i === 0 ? bucketId : crypto.randomUUID(), branchId, prefix, label, min, max),
+    ),
   ]);
 
-  return c.json({ clientId, merchantId, branchId, bucketId }, 201);
+  return c.json({
+    clientId, merchantId, branchId, bucketId,
+    merchantSlug: slug,
+    tvSlug: branchSlug,
+    walkInQrUrl: `https://zalo.me/app/link?qr=${encodeURIComponent(qrToken)}`,
+  }, 201);
 });
 
 /** GET /api/admin/config?branchId= */

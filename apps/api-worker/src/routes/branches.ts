@@ -494,8 +494,12 @@ branches.post('/:branchId/pause', async (c) => {
     /* toggle if no/invalid body */
   }
 
-  await c.env.DB.prepare(`UPDATE branches SET is_paused = ?1 WHERE id = ?2`)
-    .bind(nextPaused, branchId)
+  await c.env.DB.prepare(
+    `UPDATE branches SET is_paused = ?1,
+       paused_at = CASE WHEN ?1 = 1 THEN COALESCE(paused_at, ?3) ELSE NULL END
+     WHERE id = ?2`,
+  )
+    .bind(nextPaused, branchId, Date.now())
     .run();
 
   return c.json({

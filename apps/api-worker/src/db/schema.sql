@@ -33,6 +33,7 @@ CREATE TABLE branches (
   grace_period_mins INTEGER NOT NULL DEFAULT 10,
   created_at INTEGER NOT NULL,
   slug TEXT, -- per-branch TV slug (migrations/0002_branch_slug.sql)
+  paused_at INTEGER, -- migrations/0004_branch_paused_at.sql
   -- migrations/0003_branch_settings.sql (Manager · Cài đặt quầy)
   zns_almost_threshold INTEGER NOT NULL DEFAULT 2,
   zns_call_enabled INTEGER NOT NULL DEFAULT 1,

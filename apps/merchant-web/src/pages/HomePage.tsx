@@ -1,93 +1,47 @@
 import { useNavigate } from 'react-router-dom';
-import { adminCopy, managerCopy } from '@luotdi/shared';
-import { GridCell, KeycapButton } from '@luotdi/ui-braun';
-import { writeDevActor } from '../dev/actor';
+import { BeVe, type BeVePose } from '@luotdi/design-d';
+import '../modules/host-pos/call-console.css';
+import '../components/r4.css';
+import { writeDevActor, type DevActor } from '../dev/actor';
 
-const ADMIN_BLURB = 'Thêm client và xem mọi cơ sở';
-const CLIENT_BLURB = 'Xem thương hiệu và chi nhánh';
-const MANAGER_BLURB = 'Gọi số tại quầy';
+type Door = { n: string; tag: string; title: string; blurb: string; email: string; cta: string; pose: BeVePose; actor: DevActor; to: string; primary?: boolean };
 
+const DOORS: Door[] = [
+  { n: '01', tag: 'Nền tảng', title: 'Admin', blurb: 'Thêm client, xem mọi chi nhánh, đổi gói.', email: 'admin@luotdi.vn', cta: 'Vào admin', pose: 'idle', actor: { role: 'PLATFORM_ADMIN' }, to: '/admin' },
+  { n: '02', tag: 'Tài khoản', title: 'Client', blurb: 'Thương hiệu, chi nhánh, bàn và ví Zalo.', email: 'client@antam.vn', cta: 'Vào client', pose: 'thanks', actor: { role: 'CLIENT_ADMIN', clientId: 'client-an-tam' }, to: '/client' },
+  { n: '03', tag: 'Tại quầy', title: 'Quản lý', blurb: 'Gọi số, khách tại quầy, TV và mã QR.', email: 'manager@pho-nh.vn', cta: 'Vào quản lý', pose: 'excited', actor: { role: 'BRANCH_MANAGER', branchId: 'branch-pho-d1' }, to: '/manage/branch-pho-d1', primary: true },
+];
+
+/** Dev-only role door (M0). Production signs in with Zalo and redirects by role. */
 export function HomePage() {
   const navigate = useNavigate();
-
   return (
-    <div className="min-h-screen bg-chassis">
-      <header className="border-b border-grid bg-ink px-4 py-4 text-panel">
-        <h1 className="font-sans text-2xl font-semibold tracking-tight">
-          LượtĐi
-        </h1>
-      </header>
-
-      <section className="m-4 grid gap-3 md:grid-cols-3">
-        <GridCell label="01 / PLATFORM">
-          <h2 className="font-sans text-base font-semibold text-carbon">
-            {adminCopy.title}
-          </h2>
-          <p className="mt-2 font-sans text-sm text-carbon">{ADMIN_BLURB}</p>
-          <p className="mt-2 font-mono text-[10px] uppercase tracking-widest text-graphite tabular">
-            admin@luotdi.vn
-          </p>
-          <div className="mt-3">
-            <KeycapButton
-              variant="primary"
-              onClick={() => {
-                writeDevActor({ role: 'PLATFORM_ADMIN' });
-                navigate('/admin');
-              }}
-            >
-              {adminCopy.title}
-            </KeycapButton>
+    <div className="d-root" data-page="home" style={{ minHeight: '100vh', background: '#f6f4ea', display: 'grid', placeItems: 'center', padding: 24 }}>
+      <div style={{ display: 'grid', gap: 22, justifyItems: 'center', width: 'min(1000px, 100%)' }}>
+        <div className="r4-row">
+          <span className="cc-logo" style={{ margin: 0 }}>L</span>
+          <div>
+            <h1 className="r4-title" style={{ fontSize: 30 }}>LượtĐi</h1>
+            <span className="d-muted">Bạn đăng nhập với vai trò nào?</span>
           </div>
-        </GridCell>
-
-        <GridCell label="02 / ACCOUNT">
-          <h2 className="font-sans text-base font-semibold text-carbon">
-            Client
-          </h2>
-          <p className="mt-2 font-sans text-sm text-carbon">{CLIENT_BLURB}</p>
-          <p className="mt-2 font-mono text-[10px] uppercase tracking-widest text-graphite tabular">
-            client@antam.vn
-          </p>
-          <div className="mt-3">
-            <KeycapButton
-              variant="secondary"
-              onClick={() => {
-                writeDevActor({
-                  role: 'CLIENT_ADMIN',
-                  clientId: 'client-an-tam',
-                });
-                navigate('/client');
-              }}
-            >
-              Client
-            </KeycapButton>
-          </div>
-        </GridCell>
-
-        <GridCell label="03 / FLOOR">
-          <h2 className="font-sans text-base font-semibold text-carbon">
-            {managerCopy.eyebrow}
-          </h2>
-          <p className="mt-2 font-sans text-sm text-carbon">{MANAGER_BLURB}</p>
-          <p className="mt-2 font-mono text-[10px] uppercase tracking-widest text-graphite tabular">
-            manager@pho-nh.vn
-          </p>
-          <div className="mt-3">
-            <KeycapButton
-              variant="secondary"
-              onClick={() => {
-                writeDevActor({
-                  role: 'BRANCH_MANAGER',
-                  branchId: 'branch-pho-d1',
-                });
-                navigate('/manage/branch-pho-d1');
-              }}
-            >
-              {managerCopy.eyebrow}
-            </KeycapButton>
-          </div>
-        </GridCell>
-      </section>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 16, width: '100%' }}>
+          {DOORS.map((d) => (
+            <section key={d.title} className="r4-card" style={d.primary ? { borderColor: 'var(--d-navy)', boxShadow: '0 5px 0 var(--d-navy)' } : undefined}>
+              <div className="r4-row" style={{ alignItems: 'flex-start' }}>
+                <span className="d-label">{d.n} · {d.tag}</span>
+                <span className="r4-sp" />
+                <BeVe pose={d.pose} size={52} />
+              </div>
+              <h2 className="r4-title" style={{ fontSize: 22, marginTop: 6 }}>{d.title}</h2>
+              <p style={{ margin: '6px 0', font: '500 14.5px var(--d-font-body)' }}>{d.blurb}</p>
+              <p className="r4-mono" style={{ margin: '0 0 12px', color: 'var(--d-muted)', fontSize: 12 }}>{d.email}</p>
+              <button type="button" className={d.primary ? 'd-pill d-pill-go' : 'd-pill'} onClick={() => { writeDevActor(d.actor); navigate(d.to); }}>{d.cta} ›</button>
+            </section>
+          ))}
+        </div>
+        <span className="r4-sc r4-sc-y">Chỉ hiện ở bản thử nghiệm · bản thật đăng nhập bằng Zalo và vào thẳng trang theo vai trò</span>
+      </div>
     </div>
   );
 }
