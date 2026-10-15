@@ -8,7 +8,6 @@ dist
 coverage
 *.tsbuildinfo
 .vite
-.grok
 .env
 .env.*
 !.env.example
