@@ -23,6 +23,9 @@ export default defineWorkersConfig({
         miniflare: {
           bindings: {
             TEST_SCHEMA_SQL: schemaSql,
+            TEST_TRUST_STAFF_HEADERS: '1',
+            ENVIRONMENT: 'production',
+            JWT_SECRET: 'test-jwt-secret-0123456789abcdef',
           },
         },
       },

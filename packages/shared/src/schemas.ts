@@ -213,14 +213,25 @@ export type WsServerEvent = z.infer<typeof WsServerEventSchema>;
  * GREEN: HostQueueService SUMMON (and later other actions) POSTs this to
  * `BRANCH_QUEUE_ROOM.idFromName(branchId)` so connected sockets fan out.
  */
-export const BranchQueueBroadcastRequestSchema = z.object({
-  type: z.literal('SUMMON'),
-  branchId: z.string().min(1),
-  ticketId: z.string().min(1),
-  displayNumber: z.string().min(1),
-  status: z.literal('CALLED'),
-  at: z.number().int().positive().optional(),
-});
+export const BranchQueueBroadcastRequestSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('SUMMON'),
+    branchId: z.string().min(1),
+    ticketId: z.string().min(1),
+    displayNumber: z.string().min(1),
+    status: z.literal('CALLED'),
+    at: z.number().int().positive().optional(),
+  }),
+  /** Any other mutation (guest/host CANCEL, SEAT): QUEUE_UPDATED only, no YOUR_TURN. */
+  z.object({
+    type: z.literal('TICKET_UPDATED'),
+    branchId: z.string().min(1),
+    ticketId: z.string().min(1),
+    displayNumber: z.string().min(1),
+    status: TicketStatusSchema,
+    at: z.number().int().positive().optional(),
+  }),
+]);
 export type BranchQueueBroadcastRequest = z.infer<
   typeof BranchQueueBroadcastRequestSchema
 >;

@@ -12,6 +12,7 @@ import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 /** Ensure worker main is loaded for SELF / watch re-runs. */
 import '../src/index';
+import { signGuestJwt } from '../src/services/jwt';
 
 /**
  * Harness notes (@cloudflare/vitest-pool-workers 0.10.x):
@@ -354,4 +355,37 @@ describe('BranchQueueRoom WebSocket fan-out (Phase 2.1)', () => {
       }
     }
   });
+
+  for (const who of ['guest', 'host'] as const) {
+    it(`${who} CANCEL fans QUEUE_UPDATED{CANCELLED} to Host+TV+Customer, no YOUR_TURN`, async () => {
+      await env.DB.prepare(`UPDATE tickets SET zalo_user_id = 'z-a014' WHERE id = ?1`).bind(TICKET_A014_ID).run();
+      const sockets: SocketBag[] = [];
+      try {
+        const host = await connectBranchSocket({ type: 'HELLO', role: 'HOST', branchId: BRANCH_ID });
+        const tv = await connectBranchSocket({ type: 'HELLO', role: 'TV', branchId: BRANCH_ID });
+        const other = await connectBranchSocket({ type: 'HELLO', role: 'CUSTOMER', branchId: BRANCH_ID, ticketId: 'ticket-other' });
+        sockets.push(host, tv, other);
+        const isCancel = (e: WsServerEvent) => e.type === 'QUEUE_UPDATED' && e.ticketId === TICKET_A014_ID && e.status === 'CANCELLED';
+        const waits = [host, tv, other].map((b) => waitForEvent(b, isCancel));
+        const res =
+          who === 'guest'
+            ? await SELF.fetch(`http://localhost/api/tickets/${TICKET_A014_ID}/cancel`, {
+                method: 'POST',
+                headers: { Authorization: `Bearer ${await signGuestJwt(env.JWT_SECRET!, { sub: 'g', zid: 'z-a014' })}` },
+              })
+            : await SELF.fetch(`http://localhost/api/host/tickets/${TICKET_A014_ID}/action`, {
+                method: 'PATCH',
+                headers: HOST_AUTH_HEADERS,
+                body: JSON.stringify({ action: 'CANCEL' }),
+              });
+        expect(res.status).toBe(200);
+        await Promise.all(waits);
+        for (const b of sockets) expect(b.messages.some((m) => m.type === 'YOUR_TURN_CALLED')).toBe(false);
+      } finally {
+        for (const bag of sockets) {
+          try { bag.ws.close(1000, 'done'); } catch { /* closed */ }
+        }
+      }
+    });
+  }
 });

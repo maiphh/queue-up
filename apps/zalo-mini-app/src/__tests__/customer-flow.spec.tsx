@@ -667,6 +667,33 @@ describe('Round 4 · G1 marketplace', () => {
   });
 });
 
+describe('Owner-only ticket read', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    identityMock.value = { ...identityMock.value, status: 'ready', ready: true, error: null };
+  });
+
+  it('waits for the guest JWT before GET /api/tickets/:id', async () => {
+    identityMock.value = { ...identityMock.value, status: 'loading', ready: false, error: null };
+    const f = mockFetchRouter();
+    vi.stubGlobal('fetch', f);
+    renderApp(`/ticket/${TICKET_ID}`);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(f.mock.calls.some(([u]) => String(u).includes(`/api/tickets/${TICKET_ID}`))).toBe(false);
+  });
+
+  it('shows sign-in failure with retry instead of a forever spinner', async () => {
+    const retry = vi.fn();
+    identityMock.value = { status: 'error', ready: false, customerName: 'Khách', error: 'x', retry };
+    vi.stubGlobal('fetch', mockFetchRouter());
+    const user = userEvent.setup();
+    renderApp(`/ticket/${TICKET_ID}`);
+    expect(await screen.findByTestId('identity-error')).toHaveTextContent(guestCopy.authFailed);
+    await user.click(screen.getByRole('button', { name: guestCopy.retry }));
+    expect(retry).toHaveBeenCalled();
+  });
+});
+
 describe('Lấy số — each failure has its own message', () => {
   afterEach(() => vi.unstubAllGlobals());
 

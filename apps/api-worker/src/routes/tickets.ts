@@ -9,6 +9,7 @@ import { Hono } from 'hono';
 import type { Env } from '../index'; // type-only — avoid runtime cycle with route mount
 import { readGuestBearer } from '../services/jwt';
 import { pauseReason } from '../services/branch-hours';
+import { HostQueueService } from '../services/host-queue';
 
 const MIDDLE_DOT = '\u00B7';
 
@@ -89,8 +90,13 @@ const tickets = new Hono<{ Bindings: Env }>();
 /** GET /api/tickets/:id — live pass screen */
 tickets.get('/:id', async (c) => {
   const id = c.req.param('id');
+  // Only the guest who holds the ticket may read it (no ticket-id enumeration).
+  const bearer = await readGuestBearer(c.req.header('Authorization'), c.env.JWT_SECRET);
+  if (bearer.kind !== 'ok') {
+    return c.json(apiError('Sign in required', 'UNAUTHORIZED'), 401);
+  }
   const row = await c.env.DB.prepare(
-    `SELECT t.id, t.display_number, t.status, t.branch_id, t.bucket_id,
+    `SELECT t.id, t.zalo_user_id, t.display_number, t.status, t.branch_id, t.bucket_id,
             t.pax_count, t.created_at, t.priority_boost, t.called_at,
             b.name AS branch_name, b.grace_period_mins, b.is_paused,
             bk.prefix AS bucket_prefix, bk.label_vi AS bucket_label_vi,
@@ -103,6 +109,7 @@ tickets.get('/:id', async (c) => {
     .bind(id)
     .first<{
       id: string;
+      zalo_user_id: string | null;
       display_number: string;
       status: string;
       branch_id: string;
@@ -120,7 +127,7 @@ tickets.get('/:id', async (c) => {
       rolling_turnover_mins: number;
     }>();
 
-  if (!row) {
+  if (!row || row.zalo_user_id !== bearer.claims.zid) {
     return c.json(apiError('Ticket not found', 'TICKET_NOT_FOUND'), 404);
   }
 
@@ -411,28 +418,21 @@ export { tickets };
 
 /**
  * POST /api/tickets/:id/cancel — the guest who owns the ticket gives up
- * ("Không đến được nữa · Hủy số"). Only the JWT owner, only while open.
+ * ("Không đến được nữa · Hủy số"). Ownership is checked here; the state change
+ * goes through HostQueueService so it is atomic and fans out like a host action.
  */
 tickets.post('/:id/cancel', async (c) => {
   const bearer = await readGuestBearer(c.req.header('Authorization'), c.env.JWT_SECRET);
   if (bearer.kind !== 'ok') {
     return c.json(apiError('Sign in required', 'UNAUTHORIZED'), 401);
   }
-  const row = await c.env.DB.prepare(
-    `SELECT id, status, zalo_user_id FROM tickets WHERE id = ?1`,
-  )
+  const row = await c.env.DB.prepare(`SELECT zalo_user_id FROM tickets WHERE id = ?1`)
     .bind(c.req.param('id'))
-    .first<{ id: string; status: string; zalo_user_id: string | null }>();
+    .first<{ zalo_user_id: string | null }>();
   if (!row || row.zalo_user_id !== bearer.claims.zid) {
     return c.json(apiError('Ticket not found', 'TICKET_NOT_FOUND'), 404);
   }
-  if (!['WAITING', 'CALLED', 'HELD'].includes(row.status)) {
-    return c.json(apiError('Ticket is no longer open', 'INVALID_TRANSITION'), 409);
-  }
-  await c.env.DB.prepare(
-    `UPDATE tickets SET status = 'CANCELLED', cancelled_at = ?1 WHERE id = ?2`,
-  )
-    .bind(Date.now(), row.id)
-    .run();
-  return c.json({ id: row.id, status: 'CANCELLED' });
+  const result = await new HostQueueService(c.env.DB, c.env.BRANCH_QUEUE_ROOM).applyAction(c.req.param('id'), { action: 'CANCEL' });
+  if (!result.ok) return c.json(apiError(result.error, result.code), result.status as 409);
+  return c.json({ id: result.data.id, status: result.data.status });
 });

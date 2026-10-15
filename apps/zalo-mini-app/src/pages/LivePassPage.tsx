@@ -24,6 +24,7 @@ import {
 import { followOA } from 'zmp-sdk';
 import { useQueueSocket } from '../hooks/useQueueSocket';
 import { apiFetch } from '../lib/api';
+import { useZaloIdentity } from '../hooks/useZaloIdentity';
 import { phaseOf, type GuestPhase } from '../lib/phase';
 
 type TicketPayload = {
@@ -81,6 +82,8 @@ export function LivePassPage() {
   const { ticketId } = useParams<{ ticketId: string }>();
   const location = useLocation();
   const navigate = useNavigate();
+  // GET /api/tickets/:id is owner-only, so wait for the guest JWT.
+  const identity = useZaloIdentity();
   const [cancelling, setCancelling] = useState(false);
   const justIssued = Boolean((location.state as { justIssued?: boolean } | null)?.justIssued);
 
@@ -107,7 +110,7 @@ export function LivePassPage() {
   const bigNumRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
-    if (!ticketId) return;
+    if (!ticketId || !identity.ready) return;
     try {
       const res = await apiFetch(`/api/tickets/${ticketId}`);
       if (!res.ok) {
@@ -122,7 +125,7 @@ export function LivePassPage() {
       setOffline(true);
       setError((e) => e ?? 'Không tải được số.');
     }
-  }, [ticketId]);
+  }, [ticketId, identity.ready]);
 
   useEffect(() => {
     void load();
@@ -190,6 +193,15 @@ export function LivePassPage() {
     }
   }, [ticket, progress]);
 
+  if (identity.status === 'error' && !ticket) {
+    return (
+      <section className="zma-page zma-center" data-testid="identity-error">
+        <BeVe pose="offline" size={140} />
+        <p className="d-bubble">{guestCopy.authFailed}</p>
+        <button type="button" className="d-btn d-btn-yellow" onClick={identity.retry}>{guestCopy.retry}</button>
+      </section>
+    );
+  }
   if (error && !ticket) {
     return (
       <section className="zma-page zma-center">

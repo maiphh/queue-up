@@ -356,9 +356,13 @@ describe('POST /api/tickets — concurrency-safe issuance', () => {
   });
 
   it('GET /api/tickets/:id exposes bucket prefix, calledAt, grace and pause for the guest screens', async () => {
-    const res = await postTicket({ branchId: BRANCH_ID, paxCount: 2, customerName: 'Screens' });
+    const res = await postTicket({ branchId: BRANCH_ID, paxCount: 2, customerName: 'Screens', zaloUserId: 'z-screens' });
     const { id } = CreateTicketResponseSchema.parse(await res.json());
-    const got = await SELF.fetch(`http://localhost/api/tickets/${id}`);
+    const read = async (h?: string) => SELF.fetch(`http://localhost/api/tickets/${id}`, h ? { headers: { Authorization: h } } : {});
+    expect((await read()).status).toBe(401);
+    expect((await read('Bearer nope')).status).toBe(401);
+    expect((await read(`Bearer ${await guestToken('z-someone-else')}`)).status).toBe(404);
+    const got = await read(`Bearer ${await guestToken('z-screens')}`);
     expect(got.status).toBe(200);
     const body = (await got.json()) as Record<string, unknown>;
     expect(body).toMatchObject({ bucketPrefix: 'A', calledAt: null, isPaused: false });

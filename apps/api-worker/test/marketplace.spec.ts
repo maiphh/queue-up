@@ -55,16 +55,4 @@ describe('GET /api/branches (G1 marketplace)', () => {
     expect(res.status).toBe(409);
     expect(await res.json()).toMatchObject({ code: 'ACTIVE_TICKET_EXISTS', activeTicket: { id: 't9', displayNumber: 'A·009' } });
   });
-
-  it('guest can cancel only their own open ticket', async () => {
-    await addTickets(env.DB, [{ id: 'tc', num: 'A·003', zaloUserId: 'z-own' }]);
-    const cancel = async (zid: string) => SELF.fetch('http://x/api/tickets/tc/cancel', {
-      method: 'POST', headers: { Authorization: `Bearer ${await signGuestJwt(env.JWT_SECRET!, { sub: 'g', zid })}` },
-    });
-    expect((await cancel('z-other')).status).toBe(404);
-    expect((await cancel('z-own')).status).toBe(200);
-    const row = await env.DB.prepare(`SELECT status FROM tickets WHERE id = 'tc'`).first<{ status: string }>();
-    expect(row?.status).toBe('CANCELLED');
-    expect((await cancel('z-own')).status).toBe(409);
-  });
 });

@@ -133,6 +133,7 @@ export class BranchQueueRoom {
         const attachment =
           socket.deserializeAttachment() as SocketAttachment | null;
         if (
+          parsed.data.type === 'SUMMON' &&
           attachment?.role === 'CUSTOMER' &&
           attachment.ticketId === ticketId
         ) {

@@ -198,13 +198,17 @@ export class HostQueueService {
     // created_at / seated_at are epoch ms (same as POST /api/tickets Date.now()).
     const actualWaitMins = (seatedAt - ticket.created_at) / 60_000;
 
-    const statements = [
-      this.db
-        .prepare(
-          `UPDATE tickets SET status = 'SEATED', seated_at = ? WHERE id = ?`,
-        )
-        .bind(seatedAt, ticket.id),
-    ];
+    // Atomic compare-and-set on the status we validated, so SEAT racing CANCEL can't both win.
+    const seatedRes = await this.db
+      .prepare(
+        `UPDATE tickets SET status = 'SEATED', seated_at = ? WHERE id = ? AND status = ?`,
+      )
+      .bind(seatedAt, ticket.id, ticket.status)
+      .run();
+    if (!seatedRes.meta?.changes) {
+      return fail(409, 'INVALID_TRANSITION', 'Ticket changed, reload and try again');
+    }
+    const statements: D1PreparedStatement[] = [];
 
     if (actualWaitMins >= 2 && actualWaitMins <= 180) {
       const bucket = await this.db
@@ -226,7 +230,16 @@ export class HostQueueService {
       }
     }
 
-    await this.db.batch(statements);
+    if (statements.length) await this.db.batch(statements);
+
+    await this.notifyBranchRoom({
+      type: 'TICKET_UPDATED',
+      branchId: ticket.branch_id,
+      ticketId: ticket.id,
+      displayNumber: ticket.display_number,
+      status: 'SEATED',
+      at: seatedAt,
+    });
 
     // ApproachingTurn ZNS (prepaid wallet). Failures must not fail SEAT.
     try {
@@ -345,12 +358,26 @@ export class HostQueueService {
     if (!next.ok) return next;
 
     const cancelledAt = Date.now();
-    await this.db
+    // Atomic: only an open ticket can be cancelled, so a concurrent SEAT/CANCEL loses cleanly.
+    const res = await this.db
       .prepare(
-        `UPDATE tickets SET status = 'CANCELLED', cancelled_at = ? WHERE id = ?`,
+        `UPDATE tickets SET status = 'CANCELLED', cancelled_at = ?
+         WHERE id = ? AND status IN ('WAITING', 'CALLED', 'HELD')`,
       )
       .bind(cancelledAt, ticket.id)
       .run();
+    if (!res.meta?.changes) {
+      return fail(409, 'INVALID_TRANSITION', 'Ticket is no longer open');
+    }
+
+    await this.notifyBranchRoom({
+      type: 'TICKET_UPDATED',
+      branchId: ticket.branch_id,
+      ticketId: ticket.id,
+      displayNumber: ticket.display_number,
+      status: 'CANCELLED',
+      at: cancelledAt,
+    });
 
     return {
       ok: true,
