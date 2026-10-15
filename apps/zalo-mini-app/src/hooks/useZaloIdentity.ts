@@ -4,8 +4,8 @@
  * header by `apiFetch`. No localStorage / client-chosen user ids.
  *
  * Browser dev (`pnpm dev`, outside Zalo): falls back to POST /api/auth/dev,
- * which the Worker only enables when ENVIRONMENT=dev. Production builds never
- * take that path.
+ * automatically (DEV or VITE_SKIP_ZALO_AUTH=1, and not inside Zalo); `?as=<name>`
+ * picks a test guest. The Worker only serves that route when ENVIRONMENT=dev.
  */
 
 import { useCallback, useEffect, useState } from 'react';
@@ -84,7 +84,33 @@ async function exchange(path: string, body: unknown): Promise<AuthResponse> {
   return (await res.json()) as AuthResponse;
 }
 
+/** Dev bypass is compiled in only for `vite` dev or VITE_SKIP_ZALO_AUTH=1. */
+export function devBypassEnabled(): boolean {
+  return import.meta.env.DEV || import.meta.env.VITE_SKIP_ZALO_AUTH === '1';
+}
+
+/** True inside the Zalo app / Zalo webview (the SDK bridge is available). */
+export function isInsideZalo(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  return /zalo/i.test(navigator.userAgent);
+}
+
+/** `?as=<name>` picks a test guest in browser dev (e.g. ?as=lan, ?as=minh). */
+export function devGuestFromUrl(): string | null {
+  try {
+    const v = new URLSearchParams(window.location.search).get('as');
+    return v && v.trim() ? v.trim().slice(0, 64) : null;
+  } catch {
+    return null;
+  }
+}
+
 async function signInSteps(): Promise<AuthResponse> {
+  // Browser dev outside Zalo: skip the SDK entirely (still under signIn's single deadline).
+  if (devBypassEnabled() && !isInsideZalo()) {
+    const as = devGuestFromUrl();
+    return exchange('/api/auth/dev', as ? { devUserId: as } : {});
+  }
   let accessToken: string | null = null;
   try {
     accessToken = await getAccessToken();
@@ -92,7 +118,6 @@ async function signInSteps(): Promise<AuthResponse> {
     accessToken = null;
   }
   if (accessToken) return exchange('/api/auth/zalo', { accessToken });
-  if (import.meta.env.DEV) return exchange('/api/auth/dev', {});
   throw new Error('no zalo access token');
 }
 
