@@ -47,5 +47,5 @@ Product rules (actors, copy, queue engine) stay in `AGENTS.md`, `docs/product/*`
 - Secrets (`ZALO_APP_SECRET`, OA access token, ZNS creds, JWT key) only via `wrangler secret put`.
 - Phone/location tokens are one-shot and expire in **2 minutes** ✅ — decode immediately server-side.
 - Ask for phone only when needed (e.g. opting into ZNS), with a clear reason — unclear permission flows get rejected ✅.
-- No localStorage/cookies in the guest app; use `zmp-sdk` `setStorage/getStorage`-style native storage (see `../zmp/references/permissions-and-apis.md`) and `Authorization: Bearer` headers ✅.
+- No localStorage/cookies in the guest app; use `zmp-sdk` native storage (`setItem`/`getItem`) (see `../zmp/references/permissions-and-apis.md`) and `Authorization: Bearer` headers ✅.
 - Guest-facing copy is Vietnamese-first via `@luotdi/shared` copy (`guestCopy`).
