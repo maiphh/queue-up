@@ -209,7 +209,9 @@ branches.get('/by-qr/:qrToken', async (c) => {
     });
   }
 
+  const waitingTotal = await countWaiting(c.env.DB, branch.id);
   return c.json({
+    waitingCount: waitingTotal,
     id: branch.id,
     name: branch.name,
     district: branch.district,

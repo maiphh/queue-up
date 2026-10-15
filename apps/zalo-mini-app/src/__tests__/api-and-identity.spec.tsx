@@ -1,4 +1,4 @@
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const zmp = vi.hoisted(() => ({
@@ -18,7 +18,7 @@ vi.mock('zmp-sdk', () => ({
 
 import { apiFetch, apiUrl, getSessionToken, setSessionToken, wsUrl } from '../lib/api';
 import { resolveInitialRoute } from '../lib/initialRoute';
-import { useZaloIdentity } from '../hooks/useZaloIdentity';
+import { IDENTITY_TIMEOUT_MS, useZaloIdentity } from '../hooks/useZaloIdentity';
 
 describe('api base', () => {
   afterEach(() => {
@@ -88,5 +88,26 @@ describe('useZaloIdentity', () => {
     const { result } = renderHook(() => useZaloIdentity());
     await waitFor(() => expect(result.current.status).toBe('error'));
     expect(result.current.ready).toBe(false);
+  });
+
+  it('gives up after one overall 10s budget even if each step is slow', async () => {
+    vi.useFakeTimers();
+    try {
+      // getAccessToken takes 6s, the Worker exchange another 6s: 12s total > 10s.
+      zmp.getAccessToken.mockImplementation(() => new Promise((r) => setTimeout(() => r('zalo-at'), 6000)));
+      vi.stubGlobal('fetch', vi.fn(() => new Promise((r) => setTimeout(() => r(Response.json({ token: 't', guest: { name: null } })), 6000))));
+      const { result } = renderHook(() => useZaloIdentity());
+      expect(result.current.status).toBe('loading');
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(IDENTITY_TIMEOUT_MS - 1);
+      });
+      expect(result.current.status).toBe('loading');
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2);
+      });
+      expect(result.current.status).toBe('error');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

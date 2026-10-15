@@ -131,6 +131,14 @@ vi.mock('../hooks/useZaloIdentity', () => ({
   useZaloIdentity: vi.fn(() => identityMock.value),
 }));
 
+vi.mock('zmp-sdk', () => ({
+  requestSendNotification: vi.fn(async () => undefined),
+  followOA: vi.fn(async () => undefined),
+  getRouteParams: () => ({}),
+  getAccessToken: vi.fn(),
+  nativeStorage: { getItem: () => '', setItem: () => undefined },
+}));
+
 vi.mock('../hooks/useQueueSocket', () => ({
   useQueueSocket: vi.fn(
     (opts: { onEvent?: (event: WsServerEvent) => void } = {}) => {
@@ -154,6 +162,8 @@ function renderApp(path: string) {
   );
 }
 
+const ticketOverride = { value: {} as Record<string, unknown> };
+
 function mockFetchRouter() {
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -169,7 +179,7 @@ function mockFetchRouter() {
     }
 
     if (method === 'GET' && url.includes(`/api/tickets/${TICKET_ID}`)) {
-      return Response.json(TICKET_PAYLOAD);
+      return Response.json({ ...TICKET_PAYLOAD, ...ticketOverride.value });
     }
 
     if (
@@ -213,7 +223,7 @@ describe('Customer flow — QR deep-link check-in', () => {
     vi.clearAllMocks();
   });
 
-  it('renders branch header, party size matrix (1–8+), matching bucket and wait estimate', async () => {
+  it('renders branch header, party options 1 / 2 / 3–4 / 5+ mapped to Bàn A/B/C, and wait', async () => {
     const user = userEvent.setup();
     renderApp(`/b/${QR_TOKEN}`);
 
@@ -221,29 +231,31 @@ describe('Customer flow — QR deep-link check-in', () => {
       await screen.findByRole('heading', { name: /Pho 24 — Nguyen Hue/i }),
     ).toBeInTheDocument();
     expect(screen.getByText(guestCopy.partySize)).toBeInTheDocument();
-    expect(screen.queryByText(/SELECT PARTY SIZE/i)).not.toBeInTheDocument();
+    expect(screen.getByTestId('be-ve-idle')).toBeInTheDocument();
 
-    const partyRadios = screen.getAllByRole('radio');
-    expect(partyRadios).toHaveLength(8);
-    expect(partyRadios[0]).toHaveTextContent('1');
-    expect(partyRadios[7]).toHaveTextContent('8+');
+    const group = screen.getByRole('radiogroup', { name: guestCopy.partySize });
+    const partyRadios = within(group).getAllByRole('radio');
+    expect(partyRadios.map((r) => r.getAttribute('aria-label'))).toEqual(['1', '2', '3–4', '5+']);
+    expect(partyRadios[1]).toHaveTextContent('Bàn A');
+    expect(partyRadios[2]).toHaveTextContent('Bàn B');
+    expect(partyRadios[3]).toHaveTextContent('Bàn C');
 
-    // Party size 2 → Bucket A (1–2), live wait from branch snapshot
     await user.click(screen.getByRole('radio', { name: '2' }));
-    const matchedBucket = screen.getByTestId('matched-bucket');
-    expect(matchedBucket).toHaveTextContent(/^A$/);
-    expect(matchedBucket).toHaveAttribute('data-active', 'true');
-    expect(screen.getByText(/12\s*min/i)).toBeInTheDocument();
+    expect(screen.getByTestId('matched-bucket')).toHaveTextContent(/^A$/);
+    expect(screen.getAllByText(/~12 phút/).length).toBeGreaterThan(0);
 
-    // Party size 4 → Bucket B
-    await user.click(screen.getByRole('radio', { name: '4' }));
+    await user.click(screen.getByRole('radio', { name: '3–4' }));
     expect(screen.getByTestId('matched-bucket')).toHaveTextContent(/^B$/);
-    expect(screen.getByText(/20\s*min/i)).toBeInTheDocument();
 
-    // Party size 8+ → Bucket C
-    await user.click(screen.getByRole('radio', { name: '8+' }));
+    await user.click(screen.getByRole('radio', { name: '5+' }));
     expect(screen.getByTestId('matched-bucket')).toHaveTextContent(/^C$/);
-    expect(screen.getByText(/35\s*min/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/~35 phút/).length).toBeGreaterThan(0);
+
+    // Zalo notify opt-in defaults on and can be toggled
+    const sw = screen.getByRole('switch', { name: guestCopy.notifyMe });
+    expect(sw).toHaveAttribute('aria-checked', 'true');
+    await user.click(sw);
+    expect(sw).toHaveAttribute('aria-checked', 'false');
   });
 });
 
@@ -322,11 +334,16 @@ describe('Customer flow — live pass screen', () => {
     vi.clearAllMocks();
   });
 
-  it('shows giant A·014 readout and Đang gọi / Phía trước / Chờ khoảng strip', async () => {
+  afterEach(() => {
+    ticketOverride.value = {};
+  });
+
+  it('waiting: huge A·014, Đang gọi / Phía trước / Chờ khoảng, 4-step progress', async () => {
     renderApp(`/ticket/${TICKET_ID}`);
 
     const readout = await screen.findByTestId('ticket-display-number');
     expect(readout).toHaveTextContent(DISPLAY_NUMBER);
+    expect(screen.getByTestId('live-pass-chassis')).toHaveAttribute('data-phase', 'waiting');
 
     const metrics = screen.getByTestId('live-pass-metrics');
     expect(within(metrics).getByText(guestCopy.nowServing)).toBeInTheDocument();
@@ -334,10 +351,23 @@ describe('Customer flow — live pass screen', () => {
     expect(within(metrics).getByText(guestCopy.estWait)).toBeInTheDocument();
     expect(within(metrics).getByText(`A${MIDDLE_DOT}011`)).toBeInTheDocument();
     expect(within(metrics).getByText('3')).toBeInTheDocument();
-    expect(within(metrics).getByText(/12\s*min/i)).toBeInTheDocument();
+    expect(within(metrics).getByText('12')).toBeInTheDocument();
+    expect(screen.getByText(guestCopy.turnsLeft(3))).toBeInTheDocument();
+    expect(screen.getByTestId('steps').querySelectorAll('[data-state="done"]')).toHaveLength(1);
   });
 
-  it('YOUR_TURN_CALLED flips chassis to signal-orange with Mời vào quầy', async () => {
+  it('almost: green "Sắp đến lượt bạn!" banner with excited Bé Vé and "Mình đang đến"', async () => {
+    ticketOverride.value = { partiesAhead: 1, estimatedWaitMins: 4 };
+    const user = userEvent.setup();
+    renderApp(`/ticket/${TICKET_ID}`);
+    const banner = await screen.findByTestId('almost-banner');
+    expect(banner).toHaveTextContent(guestCopy.almostTitle);
+    expect(within(banner).getByTestId('be-ve-excited')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: guestCopy.onMyWay }));
+    expect(screen.getByRole('button', { name: guestCopy.onMyWayAck })).toBeDisabled();
+  });
+
+  it('YOUR_TURN_CALLED turns the screen green with Bé Vé celebrating', async () => {
     renderApp(`/ticket/${TICKET_ID}`);
     await screen.findByTestId('ticket-display-number');
 
@@ -354,9 +384,46 @@ describe('Customer flow — live pass screen', () => {
     });
 
     const chassis = await screen.findByTestId('live-pass-chassis');
-    expect(chassis.className).toMatch(/bg-signal-orange/);
-    expect(screen.getByText(guestCopy.proceed)).toBeInTheDocument();
-    expect(screen.queryByText(/PROCEED TO HOST STAND/i)).not.toBeInTheDocument();
+    expect(chassis).toHaveAttribute('data-phase', 'yourTurn');
+    expect(screen.getByTestId('live-pass').className).toMatch(/d-green-screen/);
+    expect(screen.getByText(guestCopy.yourTurnTitle)).toBeInTheDocument();
+    expect(screen.getByText(guestCopy.proceedTo('Bàn A'))).toBeInTheDocument();
+    expect(screen.getByTestId('be-ve-celebrate')).toBeInTheDocument();
+  });
+
+  it('CALLED shows the hold countdown from calledAt + grace', async () => {
+    ticketOverride.value = { status: 'CALLED', calledAt: Date.now() - 60_000, graceMins: 5 };
+    renderApp(`/ticket/${TICKET_ID}`);
+    expect(await screen.findByTestId('hold-countdown')).toHaveTextContent(/0[34]:\d\d/);
+  });
+
+  it('HELD shows the late Bé Vé', async () => {
+    ticketOverride.value = { status: 'HELD' };
+    renderApp(`/ticket/${TICKET_ID}`);
+    expect(await screen.findByTestId('late-banner')).toHaveTextContent(guestCopy.lateTitle);
+    expect(screen.getByTestId('be-ve-late')).toBeInTheDocument();
+  });
+
+  it('paused queue shows sleeping Bé Vé', async () => {
+    ticketOverride.value = { isPaused: true };
+    renderApp(`/ticket/${TICKET_ID}`);
+    expect(await screen.findByTestId('paused-banner')).toBeInTheDocument();
+    expect(screen.getAllByTestId('be-ve-sleep').length).toBeGreaterThan(0);
+  });
+
+  it('served: thank-you Bé Vé, 1-tap rating and reason chips', async () => {
+    ticketOverride.value = { status: 'SEATED' };
+    const user = userEvent.setup();
+    renderApp(`/ticket/${TICKET_ID}`);
+    expect(await screen.findByText(guestCopy.thanksTitle(BRANCH_PAYLOAD.name))).toBeInTheDocument();
+    expect(screen.getByTestId('be-ve-thanks')).toBeInTheDocument();
+    const send = screen.getByRole('button', { name: guestCopy.sendRating });
+    expect(send).toBeDisabled();
+    await user.click(screen.getByRole('radio', { name: '5' }));
+    await user.click(screen.getByRole('button', { name: 'Chờ nhanh' }));
+    expect(screen.getByRole('button', { name: 'Chờ nhanh' })).toHaveAttribute('aria-pressed', 'true');
+    await user.click(send);
+    expect(screen.getByRole('status')).toHaveTextContent(guestCopy.ratingThanks);
   });
 });
 
@@ -489,7 +556,7 @@ describe('Lấy số button — regression for "cannot tap" in Zalo', () => {
     const user = userEvent.setup();
     renderApp(`/b/${QR_TOKEN}`);
     await screen.findByRole('heading', { name: /Pho 24/ });
-    await user.click(screen.getByRole('radio', { name: '8+' }));
+    await user.click(screen.getByRole('radio', { name: '5+' }));
     expect(screen.getByTestId('no-bucket')).toHaveTextContent(guestCopy.noBucketForParty);
     expect(screen.getByRole('button', { name: guestCopy.issuePass })).toBeDisabled();
   });
@@ -504,5 +571,33 @@ describe('Lấy số button — regression for "cannot tap" in Zalo', () => {
     expect(screen.getByTestId('identity-error')).toHaveTextContent(guestCopy.authFailed);
     await user.click(screen.getByRole('button', { name: guestCopy.retry }));
     expect(retry).toHaveBeenCalled();
+  });
+});
+
+describe('Lấy số — each failure has its own message', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const cases: [string, () => Promise<Response>, string][] = [
+    ['409 ACTIVE_TICKET_EXISTS', async () => Response.json({ code: 'ACTIVE_TICKET_EXISTS' }, { status: 409 }), guestCopy.ticketErrors.ACTIVE_TICKET_EXISTS!],
+    ['423 QUEUE_PAUSED', async () => Response.json({ code: 'QUEUE_PAUSED' }, { status: 423 }), guestCopy.ticketErrors.QUEUE_PAUSED!],
+    ['402 FREE_QUOTA_EXCEEDED', async () => Response.json({ code: 'FREE_QUOTA_EXCEEDED' }, { status: 402 }), guestCopy.ticketErrors.FREE_QUOTA_EXCEEDED!],
+    ['401 session', async () => Response.json({ code: 'UNAUTHORIZED' }, { status: 401 }), guestCopy.ticketErrors.UNAUTHORIZED!],
+    ['500 unknown', async () => new Response('oops', { status: 500 }), guestCopy.ticketErrors.UNKNOWN!],
+    ['network', async () => { throw new TypeError('Failed to fetch'); }, guestCopy.ticketErrors.NETWORK!],
+  ];
+
+  it.each(cases)('%s', async (_label, post, message) => {
+    vi.stubGlobal('fetch', vi.fn(async (_u: RequestInfo | URL, init?: RequestInit) =>
+      (init?.method === 'POST' ? post() : Response.json(BRANCH_PAYLOAD))));
+    const user = userEvent.setup();
+    renderApp(`/b/${QR_TOKEN}`);
+    await screen.findByRole('heading', { name: /Pho 24/ });
+    await user.click(screen.getByRole('button', { name: guestCopy.issuePass }));
+    expect(await screen.findByTestId('issue-error')).toHaveTextContent(message);
+  });
+
+  it('messages are all distinct', () => {
+    const vals = Object.values(guestCopy.ticketErrors);
+    expect(new Set(vals).size).toBe(vals.length);
   });
 });
