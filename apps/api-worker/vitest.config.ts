@@ -17,6 +17,8 @@ export default defineWorkersConfig({
         miniflare: {
           bindings: {
             TEST_SCHEMA_SQL: schemaSql,
+            // Pin prod: a developer's local .dev.vars (ENVIRONMENT=dev) must not leak in.
+            ENVIRONMENT: 'production',
             JWT_SECRET: 'test-jwt-secret-0123456789abcdef',
             ZALO_APP_SECRET: 'test-zalo-app-secret',
           },

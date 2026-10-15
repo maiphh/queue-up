@@ -29,7 +29,7 @@ describe('POST /api/auth/dev', () => {
     await applySchema(env.DB, env.TEST_SCHEMA_SQL);
   });
 
-  it('is rejected (404) with the shipped wrangler.toml ENVIRONMENT=production', async () => {
+  it('is rejected (404) under the production config', async () => {
     const res = await SELF.fetch('http://local/api/auth/dev', { method: 'POST', body: '{}' });
     expect(res.status).toBe(404);
   });
