@@ -8,6 +8,7 @@ import {
 import { Hono } from 'hono';
 import type { Env } from '../index'; // type-only — avoid runtime cycle with route mount
 import { readGuestBearer } from '../services/jwt';
+import { pauseReason } from '../services/branch-hours';
 
 const MIDDLE_DOT = '\u00B7';
 
@@ -16,6 +17,10 @@ type BranchRow = {
   merchant_id: string;
   routing_mode: 'PARTY_SIZE' | 'SERVICE_TYPE';
   is_paused: number;
+  allow_remote_queue?: number;
+  open_time?: string | null;
+  close_time?: string | null;
+  auto_pause_wait_mins?: number | null;
 };
 
 type MerchantRow = {
@@ -207,7 +212,8 @@ tickets.post('/', async (c) => {
 
   const branch = await db
     .prepare(
-      `SELECT id, merchant_id, routing_mode, is_paused
+      `SELECT id, merchant_id, routing_mode, is_paused, allow_remote_queue,
+              open_time, close_time, auto_pause_wait_mins
        FROM branches WHERE id = ?1`,
     )
     .bind(req.branchId)
@@ -229,8 +235,29 @@ tickets.post('/', async (c) => {
     return c.json(apiError('Merchant not found', 'MERCHANT_NOT_FOUND'), 404);
   }
 
-  if (branch.is_paused === 1) {
+  // Manual pause, outside opening hours, or wait above the Manager's limit (Cài đặt quầy).
+  let maxWait = 0;
+  if (branch.auto_pause_wait_mins) {
+    const w = await db
+      .prepare(
+        `SELECT q.active_counters, q.rolling_turnover_mins,
+                (SELECT COUNT(*) FROM tickets t WHERE t.bucket_id = q.id AND t.status = 'WAITING') AS waiting
+         FROM queue_buckets q WHERE q.branch_id = ?1 AND q.is_active = 1`,
+      )
+      .bind(branch.id)
+      .all<{ active_counters: number; rolling_turnover_mins: number; waiting: number }>();
+    for (const b of w.results ?? []) {
+      if (b.waiting > 0) {
+        maxWait = Math.max(maxWait, Math.ceil((b.waiting + 1) / Math.max(1, b.active_counters)) * b.rolling_turnover_mins);
+      }
+    }
+  }
+  if (pauseReason(branch, Date.now(), maxWait) !== null) {
     return c.json(apiError('Queue is paused', 'QUEUE_PAUSED'), 423);
+  }
+
+  if (req.source === 'MARKETPLACE' && branch.allow_remote_queue === 0) {
+    return c.json(apiError('Remote queue is off for this branch', 'REMOTE_QUEUE_DISABLED'), 423);
   }
 
   if (merchant.plan_tier === 'FREE' && merchant.monthly_ticket_count >= 200) {

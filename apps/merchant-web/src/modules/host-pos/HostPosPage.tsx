@@ -10,6 +10,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { ManagerRail } from '../manage/ManagerRail';
 import { managerCopy as m } from '@luotdi/shared';
 import { BeVe, callPress, mascotPop, numberFlip, rowCollapse, toastIn } from '@luotdi/design-d';
 import './call-console.css';
@@ -45,6 +46,7 @@ type HostSnapshot = {
   industryType?: string;
   buckets?: SnapshotBucket[];
   graceMins?: number;
+  shortcutsEnabled?: boolean;
   stats?: { servedToday: number; cancelledToday: number; walletBalanceVnd: number };
 };
 
@@ -296,12 +298,14 @@ export function HostPosPage() {
   }, [branchId, isPaused, loadSnapshot]);
 
   // ── Keyboard shortcuts (one listener; reads the latest handlers via a ref) ──
-  const keyState = useRef({ walkInOpen, drawerTicketId, callTicket, nextUp, seatServing, holdServing, undo });
-  keyState.current = { walkInOpen, drawerTicketId, callTicket, nextUp, seatServing, holdServing, undo };
+  const shortcutsOn = snapshot?.shortcutsEnabled !== false;
+  const keyState = useRef({ shortcutsOn, walkInOpen, drawerTicketId, callTicket, nextUp, seatServing, holdServing, undo });
+  keyState.current = { shortcutsOn, walkInOpen, drawerTicketId, callTicket, nextUp, seatServing, holdServing, undo };
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const st = keyState.current;
       if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (!st.shortcutsOn) return;
       if (isTyping(e.target) || st.walkInOpen || st.drawerTicketId) return;
       const k = e.key;
       if (k === ' ' || e.code === 'Space') {
@@ -369,11 +373,7 @@ export function HostPosPage() {
 
   return (
     <div data-page="host-pos" className="d-root cc-app">
-      <nav className="cc-rail" aria-label="Điều hướng">
-        <span className="cc-logo">L</span>
-        <span className="cc-nav cc-nav-on" aria-current="page"><i />{m.nav.counter}</span>
-        <Link className="cc-nav" to={`/tv/branch/${branchId}`}><i />{m.nav.tv}</Link>
-      </nav>
+      <ManagerRail branchId={branchId} active="counter" />
 
       <div className="cc-main">
         {adminBanner ? <p data-testid="admin-view-banner" className="cc-admin">{m.adminViewBanner}</p> : null}
@@ -511,7 +511,7 @@ export function HostPosPage() {
                 <p className="d-muted">{m.emptyBody}</p>
                 <div className="cc-row">
                   <button type="button" className="d-pill" onClick={() => setWalkInOpen(true)}>+ {m.walkIn}</button>
-                  <Link className="d-pill" to={`/tv/branch/${branchId}`}>{m.printQr}</Link>
+                  <Link className="d-pill" to={`/manage/${branchId}/qr`}>{m.printQr}</Link>
                 </div>
               </div>
             ) : (

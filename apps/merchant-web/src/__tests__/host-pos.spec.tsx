@@ -184,7 +184,8 @@ describe('Call Console — layout', () => {
     expect(stats).toHaveTextContent(managerCopy.statServed);
     expect(stats).toHaveTextContent('412.000đ');
     // Mascot is NOT on the normal working screen.
-    expect(screen.queryByTestId(/^be-ve-/)).toBeNull();
+    // Round 4: Bé Vé idles in the rail corner only; none in the working area.
+    expect(screen.getAllByTestId(/^be-ve-/).every((el) => el.closest('nav'))).toBe(true);
   });
 
   it('table tabs filter rows; wait time is colour-coded', async () => {

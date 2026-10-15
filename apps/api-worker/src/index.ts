@@ -7,6 +7,7 @@ import {
   branches,
   client,
   host,
+  manage,
   superAdmin,
   tickets,
   webhooks,
@@ -71,6 +72,7 @@ app.route('/api/branches', branches);
 app.route('/api/webhooks', webhooks);
 app.route('/api/admin', admin);
 app.route('/api/client', client);
+app.route('/api/manage', manage);
 app.route('/api/super-admin', superAdmin);
 
 app.all('*', (c) => c.json({ error: 'NOT_IMPLEMENTED' }, 501));

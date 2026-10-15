@@ -35,6 +35,17 @@ export class BranchQueueRoom {
     if (request.method === 'POST' && url.pathname.endsWith('/broadcast')) {
       return this.handleBroadcast(request);
     }
+    if (request.method === 'GET' && url.pathname.endsWith('/stats')) {
+      // Manager · Mã QR & TV "n TV đang kết nối" chip.
+      const counts = { tv: 0, host: 0, customer: 0 };
+      for (const socket of this.state.getWebSockets()) {
+        const a = socket.deserializeAttachment() as SocketAttachment | null;
+        if (a?.role === 'TV') counts.tv += 1;
+        else if (a?.role === 'HOST') counts.host += 1;
+        else if (a?.role === 'CUSTOMER') counts.customer += 1;
+      }
+      return Response.json(counts);
+    }
 
     return new Response('Not found', { status: 404 });
   }

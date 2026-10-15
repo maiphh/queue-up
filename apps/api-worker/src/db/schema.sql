@@ -32,7 +32,19 @@ CREATE TABLE branches (
   is_paused INTEGER NOT NULL DEFAULT 0,
   grace_period_mins INTEGER NOT NULL DEFAULT 10,
   created_at INTEGER NOT NULL,
-  slug TEXT -- per-branch TV slug (migrations/0002_branch_slug.sql)
+  slug TEXT, -- per-branch TV slug (migrations/0002_branch_slug.sql)
+  -- migrations/0003_branch_settings.sql (Manager · Cài đặt quầy)
+  zns_almost_threshold INTEGER NOT NULL DEFAULT 2,
+  zns_call_enabled INTEGER NOT NULL DEFAULT 1,
+  open_time TEXT,
+  close_time TEXT,
+  auto_pause_wait_mins INTEGER,
+  shortcuts_enabled INTEGER NOT NULL DEFAULT 1,
+  tv_tts INTEGER NOT NULL DEFAULT 1,
+  tv_voice TEXT NOT NULL DEFAULT 'female-south',
+  tv_chime INTEGER NOT NULL DEFAULT 1,
+  tv_mascot INTEGER NOT NULL DEFAULT 1,
+  tv_static INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE UNIQUE INDEX idx_branches_slug ON branches(slug);

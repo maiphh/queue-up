@@ -1,7 +1,7 @@
 import { calculateEstimatedWait } from '@luotdi/shared';
 import { Hono } from 'hono';
 import type { Env } from '../index';
-import { assertBranchAccess, readActor } from '../services';
+import { assertBranchAccess, pauseReason, readActor } from '../services';
 
 /**
  * Branch-scoped routes.
@@ -30,6 +30,15 @@ type BranchJoinRow = {
   plan_tier: string;
   wallet_balance_vnd: number;
   slug?: string | null;
+  open_time?: string | null;
+  close_time?: string | null;
+  auto_pause_wait_mins?: number | null;
+  shortcuts_enabled?: number;
+  tv_tts?: number;
+  tv_voice?: string;
+  tv_chime?: number;
+  tv_mascot?: number;
+  tv_static?: number;
 };
 
 type BucketRow = {
@@ -72,6 +81,8 @@ function marketplaceCategory(
 
 const BRANCH_COLS = `b.id, b.name, b.address, b.district, b.city, b.qr_code_token,
               b.routing_mode, b.is_paused, b.grace_period_mins, b.slug,
+              b.open_time, b.close_time, b.auto_pause_wait_mins, b.shortcuts_enabled,
+              b.tv_tts, b.tv_voice, b.tv_chime, b.tv_mascot, b.tv_static,
               m.id AS merchant_id, m.name AS merchant_name, m.slug AS merchant_slug,
               m.industry_type, m.plan_tier, m.wallet_balance_vnd`;
 
@@ -148,8 +159,16 @@ async function buildTvPayload(db: D1Database, branch: BranchJoinRow) {
     district: branch.district,
     routingMode: branch.routing_mode,
     industryType: branch.industry_type,
-    isPaused: branch.is_paused === 1,
+    isPaused: pauseReason(branch, Date.now(), Math.max(0, ...bucketPayload.map((b) => b.estimatedWaitMins))) !== null,
+    pauseReason: pauseReason(branch, Date.now(), Math.max(0, ...bucketPayload.map((b) => b.estimatedWaitMins))),
     servedToday: served?.c ?? 0,
+    tv: {
+      tts: branch.tv_tts !== 0,
+      voice: branch.tv_voice ?? 'female-south',
+      chime: branch.tv_chime !== 0,
+      mascot: branch.tv_mascot !== 0,
+      staticMode: branch.tv_static === 1,
+    },
     walkInQrUrl: walkInQrUrl(branch.qr_code_token),
     nowServing: head
       ? {
@@ -277,10 +296,7 @@ branches.get('/', async (c) => {
 branches.get('/by-qr/:qrToken', async (c) => {
   const qrToken = c.req.param('qrToken');
   const branch = await c.env.DB.prepare(
-    `SELECT b.id, b.name, b.address, b.district, b.city, b.qr_code_token,
-            b.routing_mode, b.is_paused, b.grace_period_mins,
-            m.id AS merchant_id, m.name AS merchant_name, m.slug AS merchant_slug,
-            m.industry_type, m.plan_tier, m.wallet_balance_vnd
+    `SELECT ${BRANCH_COLS}
      FROM branches b
      JOIN merchants m ON m.id = b.merchant_id
      WHERE b.qr_code_token = ?1`,
@@ -321,7 +337,9 @@ branches.get('/by-qr/:qrToken', async (c) => {
       branch.merchant_name,
     ),
     qrToken: branch.qr_code_token,
-    isPaused: branch.is_paused === 1,
+    isPaused:
+      pauseReason(branch, Date.now(), Math.max(0, ...bucketPayload.map((b) => b.estimatedWaitMins))) !== null,
+    pauseReason: pauseReason(branch, Date.now(), Math.max(0, ...bucketPayload.map((b) => b.estimatedWaitMins))),
     buckets: bucketPayload,
   });
 });
@@ -433,6 +451,7 @@ branches.get('/:branchId/snapshot', async (c) => {
       walletBalanceVnd: branch.wallet_balance_vnd,
     },
     graceMins: branch.grace_period_mins,
+    shortcutsEnabled: branch.shortcuts_enabled !== 0,
     branchId: branch.id,
     branchName: branch.name,
     waitingCount,

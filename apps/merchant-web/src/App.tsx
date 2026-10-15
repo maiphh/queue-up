@@ -9,6 +9,7 @@ import {
 } from 'react-router-dom';
 import { DevActorSwitch } from './dev/DevActorSwitch';
 import { HostPosPage } from './modules/host-pos';
+import { HistoryPage, QrPage, ReportsPage, SettingsPage } from './modules/manage';
 import { OwnerAdminPage } from './modules/owner-admin';
 import { SuperAdminPage } from './modules/super-admin';
 import { TvKioskPage } from './modules/tv-kiosk';
@@ -47,6 +48,10 @@ export function AppRoutes() {
         element={<OwnerAdminPage />}
       />
       <Route path="/manage/:branchId" element={<HostPosPage />} />
+      <Route path="/manage/:branchId/history" element={<HistoryPage />} />
+      <Route path="/manage/:branchId/reports" element={<ReportsPage />} />
+      <Route path="/manage/:branchId/qr" element={<QrPage />} />
+      <Route path="/manage/:branchId/settings" element={<SettingsPage />} />
       <Route path="/tv/branch/:branchId" element={<TvKioskPage />} />
       <Route path="/tv/:branchSlug" element={<TvKioskPage />} />
       <Route path="/super-admin" element={<Navigate to="/admin" replace />} />

@@ -62,6 +62,7 @@ export const guestCopy = {
   ticketErrors: {
     ACTIVE_TICKET_EXISTS: 'Bạn đang có một số ở quán này rồi.',
     QUEUE_PAUSED: 'Quán đang tạm dừng nhận số. Bạn thử lại sau ít phút nhé.',
+    REMOTE_QUEUE_DISABLED: 'Quán chỉ nhận số tại quán. Bạn quét mã QR ở quầy nhé.',
     FREE_QUOTA_EXCEEDED: 'Quán đã hết lượt lấy số trong tháng. Vui lòng hỏi nhân viên.',
     UNAUTHORIZED: 'Phiên đăng nhập Zalo đã hết hạn. Bấm Thử lại để đăng nhập lại.',
     BRANCH_NOT_FOUND: 'Không tìm thấy quán này nữa.',

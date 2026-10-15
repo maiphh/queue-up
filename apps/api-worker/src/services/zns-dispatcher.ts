@@ -4,8 +4,9 @@
  * Contract for `onTicketSeated(seatedTicketId)`:
  * 1. Load the seated ticket's branch/bucket; list WAITING tickets in that
  *    bucket ordered by `(priority_boost DESC, created_at ASC)`.
- * 2. The ticket at index 2 (`partiesAhead === 2`) is the ApproachingTurn
- *    candidate (e.g. seat A·012 → notify A·014 when two parties remain ahead).
+ * 2. The ticket at index N (`partiesAhead === N`, N = branch `zns_almost_threshold`,
+ *    default 2, set by the Manager in Cài đặt quầy) is the ApproachingTurn candidate
+ *    (e.g. N=2: seat A·012 → notify A·014 when two parties remain ahead).
  * 3. If `merchant.wallet_balance_vnd >= ZNS_APPROACHING_FEE_VND` (400):
  *    - decrement wallet by 400
  *    - insert `wallet_ledger` (`tx_type: ZNS_CALL_ALERT`, `amount_vnd: -400`,
@@ -78,7 +79,8 @@ export class ZnsDispatcherService {
       .bind(seated.branch_id, seated.bucket_id)
       .all<{ id: string }>();
 
-    const candidate = waiting.results?.[2];
+    const threshold = await this.almostThreshold(seated.branch_id);
+    const candidate = waiting.results?.[threshold];
     if (!candidate) {
       return {
         notifiedTicketId: null,
@@ -94,6 +96,20 @@ export class ZnsDispatcherService {
    * Direct ApproachingTurn for a known ticket (idempotent charge + ZNS).
    * Used by tests / re-evaluation paths (e.g. after BUMP_PRIORITY).
    */
+  /** Branch "almost your turn" threshold (1–5), default 2. */
+  async almostThreshold(branchId: string): Promise<number> {
+    try {
+      const row = await this.db
+        .prepare(`SELECT zns_almost_threshold AS n FROM branches WHERE id = ?`)
+        .bind(branchId)
+        .first<{ n: number | null }>();
+      const n = Number(row?.n ?? 2);
+      return Number.isInteger(n) && n >= 1 && n <= 5 ? n : 2;
+    } catch {
+      return 2;
+    }
+  }
+
   async notifyApproachingTurn(ticketId: string): Promise<ApproachingTurnResult> {
     const ticket = await this.loadTicketContext(ticketId);
     if (!ticket) {
@@ -213,7 +229,7 @@ export class ZnsDispatcherService {
         merchantId: ticket.merchant_id,
         ticketId: ticket.id,
         displayNumber: ticket.display_number,
-        partiesAhead: 2,
+        partiesAhead: await this.almostThreshold(ticket.branch_id),
         at: createdAt,
         ...(ticket.phone ? { phone: ticket.phone } : {}),
         ...(ticket.branch_name ? { branchName: ticket.branch_name } : {}),

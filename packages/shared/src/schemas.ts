@@ -264,7 +264,8 @@ export const ZnsApproachingDispatchSchema = z.object({
   merchantId: z.string().min(1),
   ticketId: z.string().min(1),
   displayNumber: z.string().min(1),
-  partiesAhead: z.literal(2),
+  /** Groups ahead when sent = the branch's `zns_almost_threshold` (default 2). */
+  partiesAhead: z.number().int().min(1).max(5),
   at: z.number().int().positive(),
   /** Recipient phone (E.164 or 84xxxxxxxxx). Resolved server-side when a real sender is wired. */
   phone: z.string().min(1).optional(),

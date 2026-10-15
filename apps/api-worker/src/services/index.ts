@@ -29,3 +29,4 @@ export {
   toZnsPhone,
   znsSenderFromEnv,
 } from './zns-sender';
+export { isValidHhmm, isWithinHours, pauseReason, vnMinutesOfDay, type PauseReason } from './branch-hours';

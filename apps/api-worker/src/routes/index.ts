@@ -6,3 +6,4 @@ export { host } from './host';
 export { superAdmin } from './super-admin';
 export { tickets } from './tickets';
 export { webhooks } from './webhooks';
+export { manage } from './manage';
