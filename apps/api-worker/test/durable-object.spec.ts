@@ -52,26 +52,35 @@ async function applySchema(db: D1Database, sql: string): Promise<void> {
   }
 }
 
+const CLIENT_ID = 'client-test';
+
 async function clearTables(db: D1Database): Promise<void> {
   await db.prepare('DELETE FROM tickets').run();
   await db.prepare('DELETE FROM wallet_ledger').run();
+  await db.prepare('DELETE FROM staff_branch_assignments').run();
   await db.prepare('DELETE FROM queue_buckets').run();
   await db.prepare('DELETE FROM branches').run();
-  await db.prepare('DELETE FROM merchants').run();
   await db.prepare('DELETE FROM staff_users').run();
+  await db.prepare('DELETE FROM merchants').run();
+  await db.prepare('DELETE FROM clients').run();
 }
 
 async function seedMerchantBranchBucket(db: D1Database): Promise<void> {
   const now = Date.now();
 
   await db
+    .prepare(`INSERT INTO clients (id, name, created_at) VALUES (?, ?, ?)`)
+    .bind(CLIENT_ID, 'Test Client', now)
+    .run();
+
+  await db
     .prepare(
       `INSERT INTO merchants (
-        id, name, slug, industry_type, plan_tier,
+        id, client_id, name, slug, industry_type, plan_tier,
         monthly_ticket_count, wallet_balance_vnd, status, created_at
-      ) VALUES (?, ?, ?, 'RESTAURANT', 'FREE', 0, 0, 'ACTIVE', ?)`,
+      ) VALUES (?, ?, ?, ?, 'RESTAURANT', 'FREE', 0, 0, 'ACTIVE', ?)`,
     )
-    .bind(MERCHANT_ID, 'DO Cafe', 'do-cafe', now)
+    .bind(MERCHANT_ID, CLIENT_ID, 'DO Cafe', 'do-cafe', now)
     .run();
 
   await db

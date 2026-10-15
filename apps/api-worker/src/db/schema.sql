@@ -1,7 +1,14 @@
 PRAGMA foreign_keys = ON;
 
+CREATE TABLE clients (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+
 CREATE TABLE merchants (
   id TEXT PRIMARY KEY,
+  client_id TEXT NOT NULL REFERENCES clients(id),
   name TEXT NOT NULL,
   slug TEXT UNIQUE NOT NULL,
   industry_type TEXT NOT NULL DEFAULT 'RESTAURANT',
@@ -85,8 +92,15 @@ CREATE TABLE staff_users (
   id TEXT PRIMARY KEY,
   merchant_id TEXT,
   branch_id TEXT,
+  client_id TEXT,
   email TEXT UNIQUE NOT NULL,
   password_hash TEXT NOT NULL,
   role TEXT NOT NULL,
   created_at INTEGER NOT NULL
+);
+
+CREATE TABLE staff_branch_assignments (
+  staff_id TEXT NOT NULL REFERENCES staff_users(id) ON DELETE CASCADE,
+  branch_id TEXT NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
+  PRIMARY KEY (staff_id, branch_id)
 );

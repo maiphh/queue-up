@@ -6,6 +6,7 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { WsServerEvent } from '@luotdi/shared';
+import { guestCopy } from '@luotdi/shared';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import {
   afterEach,
@@ -206,14 +207,15 @@ describe('Customer flow — QR deep-link check-in', () => {
     vi.clearAllMocks();
   });
 
-  it('renders branch header, 01 / SELECT PARTY SIZE matrix (1–8+), matching bucket and wait estimate', async () => {
+  it('renders branch header, party size matrix (1–8+), matching bucket and wait estimate', async () => {
     const user = userEvent.setup();
     renderApp(`/b/${QR_TOKEN}`);
 
     expect(
       await screen.findByRole('heading', { name: /Pho 24 — Nguyen Hue/i }),
     ).toBeInTheDocument();
-    expect(screen.getByText('01 / SELECT PARTY SIZE')).toBeInTheDocument();
+    expect(screen.getByText(guestCopy.partySize)).toBeInTheDocument();
+    expect(screen.queryByText(/SELECT PARTY SIZE/i)).not.toBeInTheDocument();
 
     const partyRadios = screen.getAllByRole('radio');
     expect(partyRadios).toHaveLength(8);
@@ -253,14 +255,14 @@ describe('Customer flow — 1-tap issue pass', () => {
     vi.clearAllMocks();
   });
 
-  it('clicking ISSUE QUEUE PASS POSTs /api/tickets and navigates to /ticket/:id', async () => {
+  it('clicking Lấy số POSTs /api/tickets and navigates to /ticket/:id', async () => {
     const user = userEvent.setup();
     renderApp(`/b/${QR_TOKEN}`);
 
     await screen.findByRole('heading', { name: /Pho 24 — Nguyen Hue/i });
     await user.click(screen.getByRole('radio', { name: '2' }));
     await user.click(
-      screen.getByRole('button', { name: /ISSUE QUEUE PASS/i }),
+      screen.getByRole('button', { name: guestCopy.issuePass }),
     );
 
     await waitFor(() => {
@@ -313,22 +315,22 @@ describe('Customer flow — live pass screen', () => {
     vi.clearAllMocks();
   });
 
-  it('shows giant A·014 readout and NOW SERVING / AHEAD OF YOU / EST. WAIT strip', async () => {
+  it('shows giant A·014 readout and Đang gọi / Phía trước / Chờ khoảng strip', async () => {
     renderApp(`/ticket/${TICKET_ID}`);
 
     const readout = await screen.findByTestId('ticket-display-number');
     expect(readout).toHaveTextContent(DISPLAY_NUMBER);
 
     const metrics = screen.getByTestId('live-pass-metrics');
-    expect(within(metrics).getByText(/NOW SERVING/i)).toBeInTheDocument();
-    expect(within(metrics).getByText(/AHEAD OF YOU/i)).toBeInTheDocument();
-    expect(within(metrics).getByText(/EST\.\s*WAIT/i)).toBeInTheDocument();
+    expect(within(metrics).getByText(guestCopy.nowServing)).toBeInTheDocument();
+    expect(within(metrics).getByText(guestCopy.ahead)).toBeInTheDocument();
+    expect(within(metrics).getByText(guestCopy.estWait)).toBeInTheDocument();
     expect(within(metrics).getByText(`A${MIDDLE_DOT}011`)).toBeInTheDocument();
     expect(within(metrics).getByText('3')).toBeInTheDocument();
     expect(within(metrics).getByText(/12\s*min/i)).toBeInTheDocument();
   });
 
-  it('YOUR_TURN_CALLED flips chassis to signal-orange with PROCEED TO HOST STAND', async () => {
+  it('YOUR_TURN_CALLED flips chassis to signal-orange with Mời vào quầy', async () => {
     renderApp(`/ticket/${TICKET_ID}`);
     await screen.findByTestId('ticket-display-number');
 
@@ -346,7 +348,8 @@ describe('Customer flow — live pass screen', () => {
 
     const chassis = await screen.findByTestId('live-pass-chassis');
     expect(chassis.className).toMatch(/bg-signal-orange/);
-    expect(screen.getByText(/PROCEED TO HOST STAND/i)).toBeInTheDocument();
+    expect(screen.getByText(guestCopy.proceed)).toBeInTheDocument();
+    expect(screen.queryByText(/PROCEED TO HOST STAND/i)).not.toBeInTheDocument();
   });
 });
 
@@ -368,6 +371,11 @@ describe('Customer flow — marketplace discovery', () => {
     renderApp('/');
 
     expect(
+      await screen.findByRole('heading', { name: guestCopy.marketplaceTitle }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Marketplace/i)).not.toBeInTheDocument();
+
+    expect(
       await screen.findByText(/Pho 24 — Nguyen Hue/i),
     ).toBeInTheDocument();
     expect(screen.getByText(/District Clinic/i)).toBeInTheDocument();
@@ -377,21 +385,31 @@ describe('Customer flow — marketplace discovery', () => {
     expect(within(list).getByText('6')).toBeInTheDocument();
     expect(within(list).getByText('4')).toBeInTheDocument();
     expect(within(list).getByText('2')).toBeInTheDocument();
+    expect(within(list).getAllByText(guestCopy.waiting).length).toBeGreaterThan(
+      0,
+    );
   });
 
-  it('filters by category ALL / RESTAURANT / CLINIC / CAFE', async () => {
+  it('filters by category Tất cả / Quán ăn / Phòng khám / Cà phê', async () => {
     const user = userEvent.setup();
     renderApp('/');
 
     await screen.findByTestId('marketplace-branch-list');
 
-    for (const label of ['ALL', 'RESTAURANT', 'CLINIC', 'CAFE'] as const) {
+    for (const label of [
+      guestCopy.filterAll,
+      guestCopy.filterRestaurant,
+      guestCopy.filterClinic,
+      guestCopy.filterCafe,
+    ] as const) {
       expect(
-        screen.getByRole('button', { name: new RegExp(`^${label}$`, 'i') }),
+        screen.getByRole('button', { name: label }),
       ).toBeInTheDocument();
     }
 
-    await user.click(screen.getByRole('button', { name: /^RESTAURANT$/i }));
+    await user.click(
+      screen.getByRole('button', { name: guestCopy.filterRestaurant }),
+    );
     const list = screen.getByTestId('marketplace-branch-list');
     expect(within(list).getByText(/Pho 24 — Nguyen Hue/i)).toBeInTheDocument();
     expect(within(list).queryByText(/District Clinic/i)).not.toBeInTheDocument();
@@ -399,17 +417,23 @@ describe('Customer flow — marketplace discovery', () => {
       within(list).queryByText(/The Coffee House/i),
     ).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: /^CLINIC$/i }));
+    await user.click(
+      screen.getByRole('button', { name: guestCopy.filterClinic }),
+    );
     expect(within(list).getByText(/District Clinic/i)).toBeInTheDocument();
     expect(
       within(list).queryByText(/Pho 24 — Nguyen Hue/i),
     ).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: /^CAFE$/i }));
+    await user.click(
+      screen.getByRole('button', { name: guestCopy.filterCafe }),
+    );
     expect(within(list).getByText(/The Coffee House/i)).toBeInTheDocument();
     expect(within(list).queryByText(/District Clinic/i)).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: /^ALL$/i }));
+    await user.click(
+      screen.getByRole('button', { name: guestCopy.filterAll }),
+    );
     expect(within(list).getByText(/Pho 24 — Nguyen Hue/i)).toBeInTheDocument();
     expect(within(list).getByText(/District Clinic/i)).toBeInTheDocument();
     expect(within(list).getByText(/The Coffee House/i)).toBeInTheDocument();

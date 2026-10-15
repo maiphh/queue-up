@@ -1,5 +1,7 @@
 # LượtĐi (QueueVN) — Master Architecture & Multi-Agent TDD Implementation Blueprint
 
+Phases 0–4 are implemented. Current work is the role and usability pass in docs/product/actors.md. Do not rescaffold.
+
 - **Target Market:** Vietnam B2B2C Virtual Queueing Platform (inspired by QueQ Thailand)
 - **Design System:** Direction II — Braun / Dieter Rams Precision Hardware Grid
 - **Core Stack:** Zalo Mini App (React + Vite + Tailwind) | Merchant/Admin PWA (Cloudflare Pages) | Cloudflare Workers (Hono + TypeScript) | Cloudflare D1 (SQLite) | Cloudflare Durable Objects (WebSockets)

@@ -1,6 +1,14 @@
 import { Hono } from 'hono';
 import { BranchQueueRoom } from './do/BranchQueueRoom';
-import { admin, branches, host, superAdmin, tickets, webhooks } from './routes';
+import {
+  admin,
+  branches,
+  client,
+  host,
+  superAdmin,
+  tickets,
+  webhooks,
+} from './routes';
 import { dailyResetCron, sweepExpiredHolds } from './services';
 
 export type Env = {
@@ -17,6 +25,7 @@ app.route('/api/host', host);
 app.route('/api/branches', branches);
 app.route('/api/webhooks', webhooks);
 app.route('/api/admin', admin);
+app.route('/api/client', client);
 app.route('/api/super-admin', superAdmin);
 
 app.all('*', (c) => c.json({ error: 'NOT_IMPLEMENTED' }, 501));

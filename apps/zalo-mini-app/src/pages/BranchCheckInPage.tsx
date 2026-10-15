@@ -1,10 +1,11 @@
 /**
  * QR deep-link check-in — `/b/:qrToken`.
- * Party-size matrix, bucket highlight, wait estimate, ISSUE QUEUE PASS.
+ * Party-size matrix, bucket highlight, wait estimate, issue pass.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { guestCopy } from '@luotdi/shared';
 import {
   BraunChassis,
   GridCell,
@@ -59,13 +60,13 @@ export function BranchCheckInPage() {
       try {
         const res = await fetch(`/api/branches/by-qr/${qrToken}`);
         if (!res.ok) {
-          if (!cancelled) setError('Branch not found');
+          if (!cancelled) setError('Không tìm thấy chi nhánh.');
           return;
         }
         const data = (await res.json()) as BranchPayload;
         if (!cancelled) setBranch(data);
       } catch {
-        if (!cancelled) setError('Failed to load branch');
+        if (!cancelled) setError('Không tải được chi nhánh.');
       }
     })();
 
@@ -94,13 +95,13 @@ export function BranchCheckInPage() {
         }),
       });
       if (!res.ok) {
-        setError('Could not issue pass');
+        setError('Không lấy được số.');
         return;
       }
       const ticket = (await res.json()) as { id: string };
       navigate(`/ticket/${ticket.id}`);
     } catch {
-      setError('Could not issue pass');
+      setError('Không lấy được số.');
     } finally {
       setIssuing(false);
     }
@@ -125,7 +126,7 @@ export function BranchCheckInPage() {
   if (!branch) {
     return (
       <BraunChassis className="m-4 p-4">
-        <p className="font-mono text-xs text-graphite tabular">LOADING</p>
+        <p className="font-mono text-xs text-graphite tabular">Đang tải.</p>
       </BraunChassis>
     );
   }
@@ -141,11 +142,14 @@ export function BranchCheckInPage() {
         </p>
       </header>
 
-      <GridCell label="01 / SELECT PARTY SIZE">
+      <GridCell label="01">
+        <p className="mb-2 font-sans text-sm text-carbon">
+          {guestCopy.partySize}
+        </p>
         <SegmentedMatrix value={paxCount} onChange={setPaxCount} />
       </GridCell>
 
-      <GridCell label="02 / MATCHED BUCKET">
+      <GridCell label="02">
         <div className="flex items-end gap-4">
           {matched ? (
             <span
@@ -178,7 +182,7 @@ export function BranchCheckInPage() {
           void issuePass();
         }}
       >
-        ISSUE QUEUE PASS
+        {guestCopy.issuePass}
       </KeycapButton>
     </BraunChassis>
   );

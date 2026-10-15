@@ -5,6 +5,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { guestCopy } from '@luotdi/shared';
 import {
   BraunChassis,
   GridCell,
@@ -31,6 +32,19 @@ const CATEGORIES: CategoryFilter[] = [
   'CAFE',
 ];
 
+const FILTER_LABEL: Record<CategoryFilter, string> = {
+  ALL: guestCopy.filterAll,
+  RESTAURANT: guestCopy.filterRestaurant,
+  CLINIC: guestCopy.filterClinic,
+  CAFE: guestCopy.filterCafe,
+};
+
+const CATEGORY_LABEL: Record<string, string> = {
+  RESTAURANT: guestCopy.filterRestaurant,
+  CLINIC: guestCopy.filterClinic,
+  CAFE: guestCopy.filterCafe,
+};
+
 export function MarketplacePage() {
   const [branches, setBranches] = useState<MarketplaceBranch[]>([]);
   const [category, setCategory] = useState<CategoryFilter>('ALL');
@@ -43,13 +57,13 @@ export function MarketplacePage() {
       try {
         const res = await fetch('/api/branches');
         if (!res.ok) {
-          if (!cancelled) setError('Failed to load branches');
+          if (!cancelled) setError('Không tải được danh sách.');
           return;
         }
         const data = (await res.json()) as { branches: MarketplaceBranch[] };
         if (!cancelled) setBranches(data.branches ?? []);
       } catch {
-        if (!cancelled) setError('Failed to load branches');
+        if (!cancelled) setError('Không tải được danh sách.');
       }
     })();
 
@@ -67,22 +81,19 @@ export function MarketplacePage() {
     <BraunChassis className="m-4 flex flex-col gap-3 p-4">
       <header>
         <h1 className="font-sans text-xl font-semibold text-carbon">
-          Marketplace
+          {guestCopy.marketplaceTitle}
         </h1>
-        <p className="mt-1 font-mono text-[10px] uppercase tracking-widest text-graphite tabular">
-          01 / NEARBY BRANCHES
-        </p>
       </header>
 
       <div className="flex flex-wrap gap-2" role="group" aria-label="Category">
-        {CATEGORIES.map((label) => (
+        {CATEGORIES.map((value) => (
           <KeycapButton
-            key={label}
-            variant={category === label ? 'primary' : 'secondary'}
+            key={value}
+            variant={category === value ? 'primary' : 'secondary'}
             className="min-h-[40px] px-3 text-xs"
-            onClick={() => setCategory(label)}
+            onClick={() => setCategory(value)}
           >
-            {label}
+            {FILTER_LABEL[value]}
           </KeycapButton>
         ))}
       </div>
@@ -97,7 +108,7 @@ export function MarketplacePage() {
       >
         {filtered.map((branch) => (
           <li key={branch.id}>
-            <GridCell label={branch.category}>
+            <GridCell label={CATEGORY_LABEL[branch.category] ?? branch.category}>
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <p className="font-sans text-sm font-semibold text-carbon">
@@ -108,8 +119,8 @@ export function MarketplacePage() {
                   </p>
                 </div>
                 <div className="flex flex-col items-end gap-1">
-                  <span className="font-mono text-[10px] uppercase tracking-widest text-graphite">
-                    WAITING
+                  <span className="font-mono text-[10px] tracking-widest text-graphite">
+                    {guestCopy.waiting}
                   </span>
                   <TabularMetric
                     size="lg"
@@ -119,9 +130,9 @@ export function MarketplacePage() {
               </div>
               <Link
                 to={`/b/${branch.qrToken ?? branch.id}`}
-                className="mt-2 inline-block font-mono text-[10px] uppercase tracking-widest text-carbon underline"
+                className="mt-2 inline-block font-mono text-[10px] tracking-widest text-carbon underline"
               >
-                OPEN
+                Vào
               </Link>
             </GridCell>
           </li>

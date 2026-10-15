@@ -1,11 +1,11 @@
 /**
- * Merchant Owner Config — Phase 4.3 RED specs.
- * GREEN (AGENT-FRONTEND): implement OwnerAdminPage so these pass.
+ * Client portfolio + branch setup — Phase 3b CLIENT.
  */
 
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { clientCopy } from '@luotdi/shared';
 import {
   afterEach,
   beforeEach,
@@ -82,12 +82,63 @@ const OWNER_CONFIG = {
   },
 };
 
-function renderOwnerAdmin(path = '/admin') {
+const PORTFOLIO = {
+  clientId: 'client-an-tam',
+  clientName: 'Nhóm An Tâm',
+  brands: [
+    {
+      id: 'merchant-pho24',
+      name: 'Phở 24',
+      slug: 'pho-24',
+      industryType: 'RESTAURANT',
+      branches: [
+        {
+          id: 'branch-pho-d1',
+          name: 'Phở 24 — Nguyễn Huệ',
+          district: 'Quận 1',
+          waitingCount: 3,
+          isPaused: false,
+          queueStatus: 'OPEN',
+        },
+        {
+          id: 'branch-pho-d3',
+          name: 'Phở 24 — Quận 3',
+          district: 'Quận 3',
+          waitingCount: 1,
+          isPaused: true,
+          queueStatus: 'PAUSED',
+        },
+      ],
+    },
+    {
+      id: 'merchant-clinic',
+      name: 'Phòng Khám An Tâm',
+      slug: 'an-tam',
+      industryType: 'CLINIC',
+      branches: [
+        {
+          id: 'branch-clinic-tb',
+          name: 'Phòng Khám An Tâm — Tân Bình',
+          district: 'Tân Bình',
+          waitingCount: 5,
+          isPaused: false,
+          queueStatus: 'OPEN',
+        },
+      ],
+    },
+  ],
+};
+
+function renderOwnerAdmin(path = `/client/branches/${BRANCH_ID}`) {
   return render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
-        <Route path="/admin" element={<OwnerAdminPage />} />
-        <Route path="/admin/:branchId" element={<OwnerAdminPage />} />
+        <Route path="/client" element={<OwnerAdminPage />} />
+        <Route
+          path="/client/branches/:branchId"
+          element={<OwnerAdminPage />}
+        />
+        <Route path="/manage/:branchId" element={<div data-testid="manage-stub" />} />
       </Routes>
     </MemoryRouter>,
   );
@@ -100,6 +151,10 @@ function mockOwnerFetch(
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const method = (init?.method ?? 'GET').toUpperCase();
+
+    if (method === 'GET' && url.includes('/api/client/portfolio')) {
+      return Response.json(PORTFOLIO);
+    }
 
     if (
       method === 'GET' &&
@@ -133,6 +188,54 @@ function mockOwnerFetch(
   });
 }
 
+describe('Client portfolio — /client', () => {
+  let fetchMock: Mock;
+
+  beforeEach(() => {
+    fetchMock = mockOwnerFetch();
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  });
+
+  it('renders client name, brands Phở 24 and Phòng Khám An Tâm, not Cafe Trung', async () => {
+    renderOwnerAdmin('/client');
+
+    expect(
+      await screen.findByRole('heading', { name: 'Nhóm An Tâm' }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(clientCopy.brands)).toBeInTheDocument();
+    expect(screen.getByText('Phở 24')).toBeInTheDocument();
+    expect(screen.getByText('Phòng Khám An Tâm')).toBeInTheDocument();
+    expect(screen.queryByText(/Cafe Trung/i)).not.toBeInTheDocument();
+
+    expect(screen.queryByText(/OWNER\s*ADMIN/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/HOST/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/GOD\s*MODE/i)).not.toBeInTheDocument();
+  });
+
+  it('lists branches with waiting count, status, Xem quầy and Cài đặt', async () => {
+    const user = userEvent.setup();
+    renderOwnerAdmin('/client');
+
+    const branch = await screen.findByTestId('portfolio-branch-branch-pho-d1');
+    expect(within(branch).getByText('Phở 24 — Nguyễn Huệ')).toBeInTheDocument();
+    expect(within(branch).getByText('3')).toBeInTheDocument();
+    expect(within(branch).getByText(clientCopy.statusOpen)).toBeInTheDocument();
+
+    const paused = await screen.findByTestId('portfolio-branch-branch-pho-d3');
+    expect(within(paused).getByText(clientCopy.statusPaused)).toBeInTheDocument();
+
+    await user.click(
+      within(branch).getByRole('button', { name: clientCopy.setup }),
+    );
+    expect(await screen.findByTestId('bucket-editor')).toBeInTheDocument();
+  });
+});
+
 describe('Owner Admin — dynamic bucket editor', () => {
   let fetchMock: Mock;
 
@@ -156,15 +259,14 @@ describe('Owner Admin — dynamic bucket editor', () => {
       const row = within(editor).getByTestId(`bucket-row-${bucket.prefix}`);
       expect(within(row).getByDisplayValue(bucket.prefix)).toBeInTheDocument();
       expect(
-        (within(row).getByLabelText(/MIN\s*PAX/i) as HTMLInputElement).value,
+        (within(row).getByLabelText(clientCopy.minPax) as HTMLInputElement).value,
       ).toBe(String(bucket.minPax));
       expect(
-        (within(row).getByLabelText(/MAX\s*PAX/i) as HTMLInputElement).value,
+        (within(row).getByLabelText(clientCopy.maxPax) as HTMLInputElement).value,
       ).toBe(String(bucket.maxPax));
       expect(
-        (
-          within(row).getByLabelText(/ACTIVE\s*(COUNTERS|TABLES)/i) as HTMLInputElement
-        ).value,
+        (within(row).getByLabelText(clientCopy.counters) as HTMLInputElement)
+          .value,
       ).toBe(String(bucket.activeCounters));
     }
   });
@@ -176,11 +278,9 @@ describe('Owner Admin — dynamic bucket editor', () => {
     const editor = await screen.findByTestId('bucket-editor');
     const rowA = within(editor).getByTestId('bucket-row-A');
 
-    const minInput = within(rowA).getByLabelText(/MIN\s*PAX/i);
-    const maxInput = within(rowA).getByLabelText(/MAX\s*PAX/i);
-    const countersInput = within(rowA).getByLabelText(
-      /ACTIVE\s*(COUNTERS|TABLES)/i,
-    );
+    const minInput = within(rowA).getByLabelText(clientCopy.minPax);
+    const maxInput = within(rowA).getByLabelText(clientCopy.maxPax);
+    const countersInput = within(rowA).getByLabelText(clientCopy.counters);
 
     fireEvent.change(minInput, { target: { value: '1' } });
     fireEvent.change(maxInput, { target: { value: '3' } });
@@ -191,7 +291,7 @@ describe('Owner Admin — dynamic bucket editor', () => {
     expect((countersInput as HTMLInputElement).value).toBe('5');
 
     await user.click(
-      within(editor).getByRole('button', { name: /SAVE\s*BUCKETS/i }),
+      within(editor).getByRole('button', { name: clientCopy.save }),
     );
 
     await waitFor(() => {
@@ -230,7 +330,7 @@ describe('Owner Admin — dynamic bucket editor', () => {
 
     const editor = await screen.findByTestId('bucket-editor');
     await user.click(
-      within(editor).getByRole('button', { name: /ADD\s*BUCKET/i }),
+      within(editor).getByRole('button', { name: clientCopy.addBucket }),
     );
 
     const newRow = await within(editor).findByTestId(/^bucket-row-[DEF]$/);
@@ -262,7 +362,7 @@ describe('Owner Admin — VietQR Top-Up Generator', () => {
 
     const topUp = await screen.findByTestId('vietqr-topup');
     expect(within(topUp).getByText(/12[\s,.]*000|12000/)).toBeInTheDocument();
-    expect(within(topUp).getByText(/WALLET|BALANCE/i)).toBeInTheDocument();
+    expect(within(topUp).getByText(clientCopy.wallet)).toBeInTheDocument();
 
     const memo = within(topUp).getByTestId('vietqr-memo');
     expect(memo).toHaveTextContent(new RegExp(`LUOTDI\\s+${MERCHANT_SLUG}`, 'i'));
@@ -273,12 +373,12 @@ describe('Owner Admin — VietQR Top-Up Generator', () => {
     renderOwnerAdmin();
 
     const topUp = await screen.findByTestId('vietqr-topup');
-    const amountInput = within(topUp).getByLabelText(/AMOUNT|SO\s*TIEN|VND/i);
+    const amountInput = within(topUp).getByLabelText(/Số tiền|AMOUNT|VND/i);
     await user.clear(amountInput);
     await user.type(amountInput, '50000');
 
     await user.click(
-      within(topUp).getByRole('button', { name: /GENERATE|TAO\s*QR|CREATE\s*QR/i }),
+      within(topUp).getByRole('button', { name: clientCopy.createTransfer }),
     );
 
     const payload = await within(topUp).findByTestId('vietqr-payload');

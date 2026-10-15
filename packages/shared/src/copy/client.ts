@@ -1,0 +1,15 @@
+export const clientCopy = {
+  brands: 'Thương hiệu',
+  statusOpen: 'Đang mở',
+  statusPaused: 'Tạm dừng',
+  viewFloor: 'Xem quầy',
+  setup: 'Cài đặt',
+  prefix: 'Bàn chữ',
+  minPax: 'Số khách nhỏ nhất',
+  maxPax: 'Số khách lớn nhất',
+  counters: 'Số quầy',
+  save: 'Lưu',
+  addBucket: 'Thêm bàn',
+  wallet: 'Ví ZNS',
+  createTransfer: 'Tạo mã chuyển khoản',
+} as const;

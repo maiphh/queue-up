@@ -1,10 +1,41 @@
 import { Hono } from 'hono';
 import type { Env } from '../index';
+import { readActor } from '../services';
 
 const superAdmin = new Hono<{ Bindings: Env }>();
 
+function apiError(error: string, code: string) {
+  return { error, code };
+}
+
+function requirePlatformAdmin(c: {
+  req: { raw: { headers: Headers } };
+}):
+  | { ok: true }
+  | { ok: false; status: 401 | 403; body: { error: string; code: string } } {
+  const actorResult = readActor(c.req.raw.headers);
+  if (!actorResult.ok) {
+    return {
+      ok: false,
+      status: 401,
+      body: apiError('Staff authentication required', actorResult.code),
+    };
+  }
+  if (actorResult.actor.role !== 'PLATFORM_ADMIN') {
+    return {
+      ok: false,
+      status: 403,
+      body: apiError('Insufficient staff role', 'FORBIDDEN'),
+    };
+  }
+  return { ok: true };
+}
+
 /** GET /api/super-admin/branches */
 superAdmin.get('/branches', async (c) => {
+  const gate = requirePlatformAdmin(c);
+  if (!gate.ok) return c.json(gate.body, gate.status);
+
   const result = await c.env.DB.prepare(
     `SELECT b.id, b.name,
             m.id AS merchant_id, m.slug AS merchant_slug, m.name AS merchant_name,
@@ -39,6 +70,9 @@ superAdmin.get('/branches', async (c) => {
 
 /** POST /api/super-admin/branches/:id/impersonate — ack only (UI navigates) */
 superAdmin.post('/branches/:id/impersonate', async (c) => {
+  const gate = requirePlatformAdmin(c);
+  if (!gate.ok) return c.json(gate.body, gate.status);
+
   const id = c.req.param('id');
   const branch = await c.env.DB.prepare(`SELECT id FROM branches WHERE id = ?1`)
     .bind(id)
@@ -51,6 +85,9 @@ superAdmin.post('/branches/:id/impersonate', async (c) => {
 
 /** PATCH /api/super-admin/merchants/:id/plan */
 superAdmin.patch('/merchants/:id/plan', async (c) => {
+  const gate = requirePlatformAdmin(c);
+  if (!gate.ok) return c.json(gate.body, gate.status);
+
   const id = c.req.param('id');
   let planTier: string;
   try {
@@ -75,6 +112,9 @@ superAdmin.patch('/merchants/:id/plan', async (c) => {
 
 /** POST /api/super-admin/branches/:id/force-clear — cancel open tickets */
 superAdmin.post('/branches/:id/force-clear', async (c) => {
+  const gate = requirePlatformAdmin(c);
+  if (!gate.ok) return c.json(gate.body, gate.status);
+
   const id = c.req.param('id');
   const now = Date.now();
   const result = await c.env.DB.prepare(

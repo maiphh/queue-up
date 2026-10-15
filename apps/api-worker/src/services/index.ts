@@ -16,3 +16,9 @@ export {
   ZnsDispatcherService,
   type ZnsSender,
 } from './zns-dispatcher';
+
+export {
+  readActor,
+  assertBranchAccess,
+  type Actor,
+} from './actor';

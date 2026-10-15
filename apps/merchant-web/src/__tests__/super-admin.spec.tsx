@@ -1,6 +1,5 @@
 /**
- * Super-Admin God Mode — Phase 4.3 RED specs.
- * GREEN (AGENT-FRONTEND): implement SuperAdminPage so these pass.
+ * Platform Admin — `/admin`.
  */
 
 import { render, screen, waitFor, within } from '@testing-library/react';
@@ -17,75 +16,139 @@ import {
 } from 'vitest';
 import { SuperAdminPage } from '../modules/super-admin';
 
-const BRANCHES = [
-  {
-    id: 'branch-1',
-    name: 'Pho 24 — Nguyen Hue',
-    merchantId: 'merchant-1',
-    merchantSlug: 'pho-24',
-    merchantName: 'Pho 24',
-    planTier: 'FREE' as const,
-    waitingCount: 5,
-  },
-  {
-    id: 'branch-2',
-    name: 'Clinic Saigon — Lab',
-    merchantId: 'merchant-2',
-    merchantSlug: 'clinic-sg',
-    merchantName: 'Clinic Saigon',
-    planTier: 'PRO' as const,
-    waitingCount: 2,
-  },
-];
-
-const SUPER_SNAPSHOT = {
-  branches: BRANCHES,
+const OVERVIEW = {
+  clients: [
+    {
+      id: 'client-an-tam',
+      name: 'Nhóm An Tâm',
+      brands: [
+        {
+          id: 'merchant-pho24',
+          name: 'Phở 24',
+          slug: 'pho-24',
+          industryType: 'RESTAURANT',
+          planTier: 'FREE' as const,
+          walletBalanceVnd: 0,
+          branches: [
+            {
+              id: 'branch-pho-d1',
+              name: 'Phở 24 — Nguyễn Huệ',
+              district: 'Quận 1',
+              waitingCount: 5,
+              isPaused: false,
+            },
+            {
+              id: 'branch-pho-d3',
+              name: 'Phở 24 — Quận 3',
+              district: 'Quận 3',
+              waitingCount: 1,
+              isPaused: false,
+            },
+          ],
+        },
+        {
+          id: 'merchant-clinic',
+          name: 'Phòng Khám An Tâm',
+          slug: 'an-tam',
+          industryType: 'CLINIC',
+          planTier: 'PRO' as const,
+          walletBalanceVnd: 100000,
+          branches: [
+            {
+              id: 'branch-clinic-tb',
+              name: 'Phòng Khám — Tân Bình',
+              district: 'Tân Bình',
+              waitingCount: 2,
+              isPaused: false,
+            },
+          ],
+        },
+      ],
+    },
+    {
+      id: 'client-cafe',
+      name: 'Cafe Trung',
+      brands: [
+        {
+          id: 'merchant-cafe',
+          name: 'Cafe Trung',
+          slug: 'cafe-trung',
+          industryType: 'CAFE',
+          planTier: 'FREE' as const,
+          walletBalanceVnd: 0,
+          branches: [
+            {
+              id: 'branch-cafe-d3',
+              name: 'Cafe Trung — Quận 3',
+              district: 'Quận 3',
+              waitingCount: 0,
+              isPaused: false,
+            },
+          ],
+        },
+      ],
+    },
+  ],
 };
 
-function renderSuperAdmin(path = '/super-admin') {
+function renderAdmin(path = '/admin') {
   return render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
-        <Route path="/super-admin" element={<SuperAdminPage />} />
-        <Route path="/host/:branchId" element={<div data-testid="host-impersonation" />} />
+        <Route path="/admin" element={<SuperAdminPage />} />
+        <Route
+          path="/manage/:branchId"
+          element={<div data-testid="floor-opened" />}
+        />
       </Routes>
     </MemoryRouter>,
   );
 }
 
-function mockSuperFetch(
-  overrides: Partial<typeof SUPER_SNAPSHOT> = {},
-): Mock {
-  const payload = { ...SUPER_SNAPSHOT, ...overrides };
+function mockAdminFetch(): Mock {
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const method = (init?.method ?? 'GET').toUpperCase();
 
-    if (
-      method === 'GET' &&
-      (url.includes('/api/super-admin/branches') ||
-        url.includes('/api/super-admin/snapshot') ||
-        url.includes('/api/admin/super/branches'))
-    ) {
-      return Response.json(payload);
+    if (method === 'GET' && url.includes('/api/admin/overview')) {
+      return Response.json(OVERVIEW);
+    }
+
+    if (method === 'POST' && url.includes('/api/admin/clients')) {
+      return Response.json(
+        {
+          clientId: 'client-new',
+          merchantId: 'merchant-new',
+          branchId: 'branch-new',
+          bucketId: 'bucket-new',
+        },
+        { status: 201 },
+      );
     }
 
     if (
-      (method === 'POST' || method === 'PATCH' || method === 'PUT') &&
-      (url.includes('/api/super-admin/') || url.includes('/api/admin/super/'))
+      method === 'PATCH' &&
+      /\/api\/super-admin\/merchants\/[^/]+\/plan/.test(url)
     ) {
       return Response.json({ ok: true });
+    }
+
+    if (
+      method === 'POST' &&
+      /\/api\/super-admin\/branches\/[^/]+\/force-clear/.test(url)
+    ) {
+      return Response.json({ ok: true, cancelledCount: 1 });
     }
 
     return Response.json({ error: 'not mocked', url, method }, { status: 404 });
   });
 }
 
-describe('Super-Admin — God Mode shell', () => {
+describe('Admin — overview shell', () => {
   let fetchMock: Mock;
 
   beforeEach(() => {
-    fetchMock = mockSuperFetch();
+    fetchMock = mockAdminFetch();
     vi.stubGlobal('fetch', fetchMock);
   });
 
@@ -94,29 +157,31 @@ describe('Super-Admin — God Mode shell', () => {
     vi.clearAllMocks();
   });
 
-  it('lists branches with merchant plan tier', async () => {
-    renderSuperAdmin();
+  it('lists clients, brands, and branches with Admin chrome', async () => {
+    renderAdmin();
 
     const panel = await screen.findByTestId('super-admin-panel');
-    expect(within(panel).getByText(/GOD\s*MODE/i)).toBeInTheDocument();
-    expect(within(panel).getByText(/SUPER-?ADMIN/i)).toBeInTheDocument();
+    expect(within(panel).getByRole('heading', { name: 'Admin' })).toBeInTheDocument();
+    expect(
+      within(panel).getByRole('button', { name: /Thêm client/i }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/GOD\s*MODE/i)).not.toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/GOD\s*MODE/i);
 
-    const list = within(panel).getByTestId('branch-list');
-    expect(within(list).getByText(/Pho 24 — Nguyen Hue/i)).toBeInTheDocument();
-    expect(within(list).getByText(/Clinic Saigon — Lab/i)).toBeInTheDocument();
-
-    const rowFree = within(list).getByTestId('branch-row-branch-1');
-    const rowPro = within(list).getByTestId('branch-row-branch-2');
-    expect(within(rowFree).getByText(/^FREE$/)).toBeInTheDocument();
-    expect(within(rowPro).getByText(/^PRO$/)).toBeInTheDocument();
+    expect(await screen.findByText('Nhóm An Tâm')).toBeInTheDocument();
+    expect(screen.getAllByText('Cafe Trung').length).toBeGreaterThan(0);
+    expect(screen.getByText('Phở 24 — Nguyễn Huệ')).toBeInTheDocument();
+    expect(screen.getByText('Phở 24 — Quận 3')).toBeInTheDocument();
+    expect(screen.getByText('Phòng Khám — Tân Bình')).toBeInTheDocument();
+    expect(screen.getByText('Cafe Trung — Quận 3')).toBeInTheDocument();
   });
 });
 
-describe('Super-Admin — impersonate branch', () => {
+describe('Admin — onboard client', () => {
   let fetchMock: Mock;
 
   beforeEach(() => {
-    fetchMock = mockSuperFetch();
+    fetchMock = mockAdminFetch();
     vi.stubGlobal('fetch', fetchMock);
   });
 
@@ -125,37 +190,52 @@ describe('Super-Admin — impersonate branch', () => {
     vi.clearAllMocks();
   });
 
-  it('impersonates a branch and routes to host console', async () => {
+  it('submits POST /api/admin/clients with clientName', async () => {
     const user = userEvent.setup();
-    renderSuperAdmin();
+    renderAdmin();
 
     const panel = await screen.findByTestId('super-admin-panel');
-    const row = within(panel).getByTestId('branch-row-branch-1');
+    await user.click(
+      within(panel).getByRole('button', { name: /Thêm client/i }),
+    );
+
+    const form = await screen.findByTestId('onboard-form');
+    await user.type(within(form).getByLabelText(/clientName/i), 'Nhóm Mới');
+    await user.type(within(form).getByLabelText(/brandName/i), 'Brand Mới');
+    await user.type(within(form).getByLabelText(/branchName/i), 'Chi nhánh 1');
+    await user.type(within(form).getByLabelText(/^address$/i), '1 Lê Lợi');
+    await user.type(within(form).getByLabelText(/district/i), 'Quận 1');
 
     await user.click(
-      within(row).getByRole('button', { name: /IMPERSONATE/i }),
+      within(form).getByRole('button', { name: /Thêm client/i }),
     );
 
     await waitFor(() => {
-      expect(screen.getByTestId('host-impersonation')).toBeInTheDocument();
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/admin/clients',
+        expect.objectContaining({
+          method: 'POST',
+        }),
+      );
     });
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringMatching(
-        /\/api\/super-admin\/(branches\/[^/]+\/)?impersonate|\/api\/admin\/super\/impersonate/,
-      ),
-      expect.objectContaining({
-        method: expect.stringMatching(/POST|PUT|PATCH/i),
-      }),
-    );
+    const onboardCall = fetchMock.mock.calls.find(([url, init]) => {
+      return (
+        String(url).includes('/api/admin/clients') &&
+        String((init as RequestInit)?.method ?? '').toUpperCase() === 'POST'
+      );
+    });
+    expect(onboardCall).toBeDefined();
+    const body = JSON.parse(String((onboardCall![1] as RequestInit).body));
+    expect(body.clientName).toBe('Nhóm Mới');
   });
 });
 
-describe('Super-Admin — plan_tier override', () => {
+describe('Admin — open floor', () => {
   let fetchMock: Mock;
 
   beforeEach(() => {
-    fetchMock = mockSuperFetch();
+    fetchMock = mockAdminFetch();
     vi.stubGlobal('fetch', fetchMock);
   });
 
@@ -164,28 +244,52 @@ describe('Super-Admin — plan_tier override', () => {
     vi.clearAllMocks();
   });
 
-  it('overrides plan_tier FREE <-> PRO for a merchant', async () => {
+  it('navigates to /manage/:branchId', async () => {
     const user = userEvent.setup();
-    renderSuperAdmin();
+    renderAdmin();
 
-    const panel = await screen.findByTestId('super-admin-panel');
-    const row = within(panel).getByTestId('branch-row-branch-1');
+    const row = await screen.findByTestId('branch-row-branch-pho-d1');
+    await user.click(
+      within(row).getByRole('button', { name: /Mở quầy/i }),
+    );
 
-    expect(within(row).getByText(/\bFREE\b/)).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByTestId('floor-opened')).toBeInTheDocument();
+    });
+  });
+});
+
+describe('Admin — plan_tier override', () => {
+  let fetchMock: Mock;
+
+  beforeEach(() => {
+    fetchMock = mockAdminFetch();
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  });
+
+  it('toggles plan via PATCH super-admin merchants plan', async () => {
+    const user = userEvent.setup();
+    renderAdmin();
+
+    const brand = await screen.findByTestId('brand-merchant-pho24');
+    expect(within(brand).getByText(/^FREE$/)).toBeInTheDocument();
 
     await user.click(
-      within(row).getByRole('button', {
-        name: /SET\s*PRO|OVERRIDE.*PRO|PLAN.*PRO|TO\s*PRO/i,
-      }),
+      within(brand).getByRole('button', { name: /Đổi gói/i }),
     );
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
         expect.stringMatching(
-          /\/api\/super-admin\/(merchants\/[^/]+\/)?plan|\/api\/admin\/super\/plan/,
+          /\/api\/super-admin\/merchants\/merchant-pho24\/plan/,
         ),
         expect.objectContaining({
-          method: expect.stringMatching(/POST|PUT|PATCH/i),
+          method: 'PATCH',
         }),
       );
     });
@@ -193,22 +297,20 @@ describe('Super-Admin — plan_tier override', () => {
     const planCall = fetchMock.mock.calls.find(([url, init]) => {
       const u = String(url);
       const m = String((init as RequestInit)?.method ?? '');
-      return (
-        /plan/i.test(u) &&
-        /POST|PUT|PATCH/i.test(m)
-      );
+      return /plan/i.test(u) && /PATCH/i.test(m);
     });
     expect(planCall).toBeDefined();
     const body = JSON.parse(String((planCall![1] as RequestInit).body));
     expect(body.planTier ?? body.plan_tier).toMatch(/^PRO$/i);
+    expect(body.merchantId).toBe('merchant-pho24');
   });
 });
 
-describe('Super-Admin — force-clear stuck queues', () => {
+describe('Admin — force-clear stuck queues', () => {
   let fetchMock: Mock;
 
   beforeEach(() => {
-    fetchMock = mockSuperFetch();
+    fetchMock = mockAdminFetch();
     vi.stubGlobal('fetch', fetchMock);
   });
 
@@ -217,26 +319,34 @@ describe('Super-Admin — force-clear stuck queues', () => {
     vi.clearAllMocks();
   });
 
-  it('force-clears stuck WAITING/CALLED/HELD tickets for a branch', async () => {
+  it('requires confirm before POST force-clear', async () => {
     const user = userEvent.setup();
-    renderSuperAdmin();
+    renderAdmin();
 
-    const panel = await screen.findByTestId('super-admin-panel');
-    const row = within(panel).getByTestId('branch-row-branch-1');
+    const row = await screen.findByTestId('branch-row-branch-pho-d1');
 
     await user.click(
-      within(row).getByRole('button', {
-        name: /FORCE\s*CLEAR|CLEAR\s*QUEUE|CLEAR\s*STUCK/i,
-      }),
+      within(row).getByRole('button', { name: /Xóa hàng chờ/i }),
+    );
+
+    const forceClearBefore = fetchMock.mock.calls.filter(([url, init]) => {
+      const u = String(url);
+      const m = String((init as RequestInit)?.method ?? 'GET');
+      return /force-clear/i.test(u) && /POST/i.test(m);
+    });
+    expect(forceClearBefore).toHaveLength(0);
+
+    await user.click(
+      within(row).getByRole('button', { name: /Xác nhận xóa/i }),
     );
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
         expect.stringMatching(
-          /\/api\/super-admin\/(branches\/[^/]+\/)?(force-clear|clear-queue)|\/api\/admin\/super\/(force-clear|clear)/,
+          /\/api\/super-admin\/branches\/branch-pho-d1\/force-clear/,
         ),
         expect.objectContaining({
-          method: expect.stringMatching(/POST|PUT|PATCH|DELETE/i),
+          method: 'POST',
         }),
       );
     });

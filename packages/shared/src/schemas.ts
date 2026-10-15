@@ -340,3 +340,31 @@ export const SepayWebhookResultSchema = z.object({
     .optional(),
 });
 export type SepayWebhookResult = z.infer<typeof SepayWebhookResultSchema>;
+
+// --- Platform admin onboard (role pass) ---
+
+export const IndustryTypeSchema = z.enum([
+  'RESTAURANT',
+  'CLINIC',
+  'HOSPITAL',
+  'SALON',
+  'BANK',
+  'CAFE',
+]);
+export type IndustryType = z.infer<typeof IndustryTypeSchema>;
+
+export const PlanTierSchema = z.enum(['FREE', 'PRO']);
+export type PlanTier = z.infer<typeof PlanTierSchema>;
+
+/** POST /api/admin/clients — PLATFORM_ADMIN onboard. */
+export const OnboardClientRequestSchema = z.object({
+  clientName: z.string().min(1),
+  brandName: z.string().min(1),
+  industryType: IndustryTypeSchema,
+  branchName: z.string().min(1),
+  address: z.string().min(1),
+  district: z.string().min(1),
+  routingMode: RoutingModeSchema,
+  planTier: PlanTierSchema,
+});
+export type OnboardClientRequest = z.infer<typeof OnboardClientRequestSchema>;

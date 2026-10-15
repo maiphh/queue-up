@@ -1,6 +1,5 @@
 /**
- * Smart TV 16:9 Caller — Phase 4.2 RED specs.
- * GREEN (AGENT-FRONTEND): implement TvKioskPage so these pass.
+ * Smart TV 16:9 Caller — Phase 4.2 RED specs + branch-id route.
  */
 
 import { act, render, screen, within } from '@testing-library/react';
@@ -88,6 +87,7 @@ function renderTvKiosk(path = `/tv/${BRANCH_SLUG}`) {
   return render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
+        <Route path="/tv/branch/:branchId" element={<TvKioskPage />} />
         <Route path="/tv/:branchSlug" element={<TvKioskPage />} />
       </Routes>
     </MemoryRouter>,
@@ -155,7 +155,7 @@ describe('Smart TV — YOUR_TURN_CALLED summoning panel', () => {
     vi.clearAllMocks();
   });
 
-  it('flashes ticket on left 50% NOW SUMMONING when YOUR_TURN_CALLED arrives', async () => {
+  it('flashes ticket on left 50% Đang mời when YOUR_TURN_CALLED arrives', async () => {
     renderTvKiosk();
 
     const layout = await screen.findByTestId('tv-kiosk-layout');
@@ -175,7 +175,7 @@ describe('Smart TV — YOUR_TURN_CALLED summoning panel', () => {
     });
 
     expect(useQueueSocket).toHaveBeenCalled();
-    expect(within(left).getByText(/NOW\s*SUMMONING/i)).toBeInTheDocument();
+    expect(within(left).getByText(/Đang mời/i)).toBeInTheDocument();
     expect(within(left).getByText(DISPLAY_A014)).toBeInTheDocument();
     // Flash / highlight signal for the summoned ticket
     expect(left.className).toMatch(/signal-orange|flash|summoning/i);
@@ -266,5 +266,67 @@ describe('Smart TV — right panel bucket summary + walk-in QR', () => {
       : qr.querySelector('[data-qr-url], img, svg, canvas');
     expect(target).not.toBeNull();
     expect(target!.getAttribute('data-qr-url')).toBe(TV_SNAPSHOT.walkInQrUrl);
+  });
+});
+
+describe('Smart TV — /tv/branch/:branchId endpoint', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  });
+
+  it('loads Phở 24 Quận 3 from branch-id TV URL, not slug LIMIT 1', async () => {
+    const branchPhoD3 = 'branch-pho-d3';
+    const payload = {
+      branchId: branchPhoD3,
+      branchSlug: 'pho-24',
+      branchName: 'Phở 24 Quận 3',
+      walkInQrUrl: 'https://luotdi.app/b/qr-pho-q3',
+      buckets: TV_SNAPSHOT.buckets,
+    };
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes(`/api/branches/${branchPhoD3}/tv`)) {
+        return Response.json(payload);
+      }
+      if (url.includes('/api/branches/slug/')) {
+        return Response.json({
+          ...TV_SNAPSHOT,
+          branchName: 'Phở 24 Nguyễn Huệ',
+        });
+      }
+      return Response.json({ error: 'not mocked', url }, { status: 404 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('speechSynthesis', {
+      speak: vi.fn(),
+      cancel: vi.fn(),
+      getVoices: () => [],
+    });
+    vi.stubGlobal(
+      'SpeechSynthesisUtterance',
+      class {
+        text: string;
+        lang = '';
+        constructor(text: string) {
+          this.text = text;
+        }
+      },
+    );
+
+    renderTvKiosk(`/tv/branch/${branchPhoD3}`);
+
+    expect(await screen.findByText('Phở 24 Quận 3')).toBeInTheDocument();
+    expect(screen.queryByText(/Nguyễn Huệ/i)).not.toBeInTheDocument();
+
+    expect(fetchMock).toHaveBeenCalled();
+    const calledUrls = fetchMock.mock.calls.map((c) => String(c[0]));
+    expect(
+      calledUrls.some((u) => u.includes(`/api/branches/${branchPhoD3}/tv`)),
+    ).toBe(true);
+    expect(calledUrls.some((u) => u.includes('/api/branches/slug/'))).toBe(
+      false,
+    );
   });
 });

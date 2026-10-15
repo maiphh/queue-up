@@ -6,20 +6,38 @@ PRAGMA foreign_keys = ON;
 
 DELETE FROM wallet_ledger;
 DELETE FROM tickets;
-DELETE FROM staff_users;
+DELETE FROM staff_branch_assignments;
 DELETE FROM queue_buckets;
 DELETE FROM branches;
+DELETE FROM staff_users;
 DELETE FROM merchants;
+DELETE FROM clients;
 
 -- ---------------------------------------------------------------------------
--- Merchants
+-- Clients
+-- ---------------------------------------------------------------------------
+INSERT INTO clients (id, name, created_at) VALUES
+  (
+    'client-an-tam',
+    'Nhóm An Tâm',
+    (unixepoch('now') - 86400 * 90) * 1000
+  ),
+  (
+    'client-cafe',
+    'Cafe Trung',
+    (unixepoch('now') - 86400 * 30) * 1000
+  );
+
+-- ---------------------------------------------------------------------------
+-- Merchants (brands)
 -- ---------------------------------------------------------------------------
 INSERT INTO merchants (
-  id, name, slug, industry_type, plan_tier,
+  id, client_id, name, slug, industry_type, plan_tier,
   monthly_ticket_count, wallet_balance_vnd, status, created_at
 ) VALUES
   (
     'merchant-pho24',
+    'client-an-tam',
     'Phở 24',
     'pho-24',
     'RESTAURANT',
@@ -31,6 +49,7 @@ INSERT INTO merchants (
   ),
   (
     'merchant-cafe',
+    'client-cafe',
     'Cafe Trung',
     'cafe-trung',
     'RESTAURANT',
@@ -42,6 +61,7 @@ INSERT INTO merchants (
   ),
   (
     'merchant-clinic',
+    'client-an-tam',
     'Phòng Khám An Tâm',
     'an-tam',
     'CLINIC',
@@ -75,6 +95,20 @@ INSERT INTO branches (
     (unixepoch('now') - 86400 * 90) * 1000
   ),
   (
+    'branch-pho-d3',
+    'merchant-pho24',
+    'Phở 24 Quận 3',
+    '88 Võ Văn Tần',
+    'Quận 3',
+    'Ho Chi Minh',
+    'qr-pho-q3',
+    'PARTY_SIZE',
+    1,
+    0,
+    10,
+    (unixepoch('now') - 86400 * 14) * 1000
+  ),
+  (
     'branch-cafe-d3',
     'merchant-cafe',
     'Cafe Trung Điện Biên Phủ',
@@ -106,7 +140,7 @@ INSERT INTO branches (
 -- ---------------------------------------------------------------------------
 -- Queue buckets
 -- ---------------------------------------------------------------------------
--- Phở 24 — party-size A/B/C (seq already advanced for seeded tickets)
+-- Phở 24 D1 — party-size A/B/C (seq already advanced for seeded tickets)
 INSERT INTO queue_buckets (
   id, branch_id, prefix, label_vi, label_en,
   min_pax, max_pax, active_counters, rolling_turnover_mins,
@@ -115,6 +149,16 @@ INSERT INTO queue_buckets (
   ('bucket-pho-a', 'branch-pho-d1', 'A', '01-02 KHÁCH', '01-02 GUESTS', 1, 2, 4, 18, 8, 1),
   ('bucket-pho-b', 'branch-pho-d1', 'B', '03-04 KHÁCH', '03-04 GUESTS', 3, 4, 3, 25, 3, 1),
   ('bucket-pho-c', 'branch-pho-d1', 'C', '05-12 KHÁCH', '05-12 GUESTS', 5, 12, 2, 35, 1, 1);
+
+-- Phở 24 D3 — fresh A/B/C
+INSERT INTO queue_buckets (
+  id, branch_id, prefix, label_vi, label_en,
+  min_pax, max_pax, active_counters, rolling_turnover_mins,
+  current_seq, is_active
+) VALUES
+  ('bucket-pho-d3-a', 'branch-pho-d3', 'A', '01-02 KHÁCH', '01-02 GUESTS', 1, 2, 4, 18, 0, 1),
+  ('bucket-pho-d3-b', 'branch-pho-d3', 'B', '03-04 KHÁCH', '03-04 GUESTS', 3, 4, 3, 25, 0, 1),
+  ('bucket-pho-d3-c', 'branch-pho-d3', 'C', '05-12 KHÁCH', '05-12 GUESTS', 5, 12, 2, 35, 0, 1);
 
 -- Cafe Trung — smaller floor
 INSERT INTO queue_buckets (
@@ -395,35 +439,84 @@ INSERT INTO tickets (
 -- Staff (password_hash is a placeholder — not for real auth)
 -- ---------------------------------------------------------------------------
 INSERT INTO staff_users (
-  id, merchant_id, branch_id, email, password_hash, role, created_at
+  id, merchant_id, branch_id, client_id, email, password_hash, role, created_at
 ) VALUES
   (
-    'staff-pho-host',
-    'merchant-pho24',
-    'branch-pho-d1',
-    'host@pho24.vn',
-    'dev-only-not-a-real-hash',
-    'BRANCH_HOST',
-    (unixepoch('now') - 86400 * 90) * 1000
-  ),
-  (
-    'staff-pho-owner',
-    'merchant-pho24',
+    'staff-platform-admin',
     NULL,
-    'owner@pho24.vn',
-    'dev-only-not-a-real-hash',
-    'MERCHANT_OWNER',
-    (unixepoch('now') - 86400 * 90) * 1000
-  ),
-  (
-    'staff-super',
     NULL,
     NULL,
     'admin@luotdi.vn',
     'dev-only-not-a-real-hash',
-    'SUPER_ADMIN',
+    'PLATFORM_ADMIN',
     (unixepoch('now') - 86400 * 120) * 1000
+  ),
+  (
+    'staff-client-antam',
+    NULL,
+    NULL,
+    'client-an-tam',
+    'client@antam.vn',
+    'dev-only-not-a-real-hash',
+    'CLIENT_ADMIN',
+    (unixepoch('now') - 86400 * 90) * 1000
+  ),
+  (
+    'staff-client-cafe',
+    NULL,
+    NULL,
+    'client-cafe',
+    'client@cafetrung.vn',
+    'dev-only-not-a-real-hash',
+    'CLIENT_ADMIN',
+    (unixepoch('now') - 86400 * 30) * 1000
+  ),
+  (
+    'staff-manager-pho-nh',
+    'merchant-pho24',
+    'branch-pho-d1',
+    NULL,
+    'manager@pho-nh.vn',
+    'dev-only-not-a-real-hash',
+    'BRANCH_MANAGER',
+    (unixepoch('now') - 86400 * 90) * 1000
+  ),
+  (
+    'staff-manager-pho-q3',
+    'merchant-pho24',
+    'branch-pho-d3',
+    NULL,
+    'manager@pho-q3.vn',
+    'dev-only-not-a-real-hash',
+    'BRANCH_MANAGER',
+    (unixepoch('now') - 86400 * 14) * 1000
+  ),
+  (
+    'staff-manager-clinic',
+    'merchant-clinic',
+    'branch-clinic-tb',
+    NULL,
+    'manager@clinic.vn',
+    'dev-only-not-a-real-hash',
+    'BRANCH_MANAGER',
+    (unixepoch('now') - 86400 * 60) * 1000
+  ),
+  (
+    'staff-manager-cafe',
+    'merchant-cafe',
+    'branch-cafe-d3',
+    NULL,
+    'manager@cafe.vn',
+    'dev-only-not-a-real-hash',
+    'BRANCH_MANAGER',
+    (unixepoch('now') - 86400 * 30) * 1000
   );
+
+INSERT INTO staff_branch_assignments (staff_id, branch_id) VALUES
+  ('staff-manager-pho-nh', 'branch-pho-d1'),
+  ('staff-manager-pho-q3', 'branch-pho-d3'),
+  ('staff-manager-clinic', 'branch-clinic-tb'),
+  ('staff-manager-cafe', 'branch-cafe-d3');
 
 -- ---------------------------------------------------------------------------
 -- Wallet ledger sample (top-up history)

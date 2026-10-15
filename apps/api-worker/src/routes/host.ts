@@ -1,13 +1,11 @@
 import { HostTicketActionRequestSchema } from '@luotdi/shared';
 import { Hono } from 'hono';
 import type { Env } from '../index';
-import { HostQueueService } from '../services/host-queue';
-
-const ALLOWED_TEST_ROLES = new Set(['BRANCH_HOST', 'MERCHANT_OWNER']);
+import { assertBranchAccess, HostQueueService, readActor } from '../services';
 
 /**
  * Host queue mutations.
- * Production JWT lands later; test/miniflare honors `X-Test-Staff-Role`.
+ * Production JWT lands later; test/miniflare honors actor headers.
  */
 const host = new Hono<{ Bindings: Env }>();
 
@@ -16,12 +14,9 @@ function apiError(error: string, code: string) {
 }
 
 host.patch('/tickets/:id/action', async (c) => {
-  const role = c.req.header('X-Test-Staff-Role');
-  if (!role) {
-    return c.json(apiError('Staff authentication required', 'UNAUTHORIZED'), 401);
-  }
-  if (!ALLOWED_TEST_ROLES.has(role)) {
-    return c.json(apiError('Insufficient staff role', 'FORBIDDEN'), 403);
+  const actorResult = readActor(c.req.raw.headers);
+  if (!actorResult.ok) {
+    return c.json(apiError('Staff authentication required', actorResult.code), 401);
   }
 
   let body: unknown;
@@ -37,6 +32,25 @@ host.patch('/tickets/:id/action', async (c) => {
   }
 
   const ticketId = c.req.param('id');
+  const ticket = await c.env.DB.prepare(
+    `SELECT id, branch_id FROM tickets WHERE id = ?1`,
+  )
+    .bind(ticketId)
+    .first<{ id: string; branch_id: string }>();
+
+  if (!ticket) {
+    return c.json(apiError('Ticket not found', 'TICKET_NOT_FOUND'), 404);
+  }
+
+  const access = await assertBranchAccess(
+    c.env.DB,
+    actorResult.actor,
+    ticket.branch_id,
+  );
+  if (access !== true) {
+    return c.json(apiError('Insufficient staff role', access.code), access.status);
+  }
+
   const service = new HostQueueService(c.env.DB, c.env.BRANCH_QUEUE_ROOM);
   const result = await service.applyAction(ticketId, parsed.data);
 

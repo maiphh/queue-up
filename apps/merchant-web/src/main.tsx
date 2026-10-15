@@ -1,7 +1,10 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
+import { installActorFetch } from './dev/installActorFetch';
 import './index.css';
+
+installActorFetch();
 
 const root = document.getElementById('root');
 if (!root) {

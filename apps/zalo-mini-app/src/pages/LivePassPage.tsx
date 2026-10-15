@@ -5,7 +5,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import type { WsServerEvent } from '@luotdi/shared';
+import { guestCopy, type WsServerEvent } from '@luotdi/shared';
 import {
   BraunChassis,
   GridCell,
@@ -40,13 +40,13 @@ export function LivePassPage() {
       try {
         const res = await fetch(`/api/tickets/${ticketId}`);
         if (!res.ok) {
-          if (!cancelled) setError('Ticket not found');
+          if (!cancelled) setError('Không tìm thấy số.');
           return;
         }
         const data = (await res.json()) as TicketPayload;
         if (!cancelled) setTicket(data);
       } catch {
-        if (!cancelled) setError('Failed to load ticket');
+        if (!cancelled) setError('Không tải được số.');
       }
     })();
 
@@ -84,7 +84,7 @@ export function LivePassPage() {
   if (!ticket) {
     return (
       <BraunChassis className="m-4 p-4">
-        <p className="font-mono text-xs text-graphite tabular">LOADING</p>
+        <p className="font-mono text-xs text-graphite tabular">Đang tải.</p>
       </BraunChassis>
     );
   }
@@ -111,8 +111,8 @@ export function LivePassPage() {
           />
         </div>
         {yourTurn ? (
-          <p className="mt-4 font-sans text-sm font-semibold uppercase tracking-wide">
-            PROCEED TO HOST STAND
+          <p className="mt-4 font-sans text-sm font-semibold tracking-wide">
+            {guestCopy.proceed}
           </p>
         ) : null}
       </div>
@@ -121,16 +121,19 @@ export function LivePassPage() {
         data-testid="live-pass-metrics"
         className="grid grid-cols-3 border border-grid"
       >
-        <GridCell label="NOW SERVING" className="border-0 border-r border-grid">
+        <GridCell
+          label={guestCopy.nowServing}
+          className="border-0 border-r border-grid"
+        >
           <TabularMetric size="lg" value={ticket.nowServing} />
         </GridCell>
         <GridCell
-          label="AHEAD OF YOU"
+          label={guestCopy.ahead}
           className="border-0 border-r border-grid"
         >
           <TabularMetric size="lg" value={String(ticket.partiesAhead)} />
         </GridCell>
-        <GridCell label="EST. WAIT" className="border-0">
+        <GridCell label={guestCopy.estWait} className="border-0">
           <TabularMetric
             size="lg"
             value={`${ticket.estimatedWaitMins} min`}

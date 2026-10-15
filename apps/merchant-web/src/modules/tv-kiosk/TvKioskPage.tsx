@@ -1,11 +1,11 @@
 /**
- * Smart TV 16:9 Caller — `/tv/:branchSlug`.
- * Left: NOW SUMMONING + vi-VN TTS. Right: bucket summary + walk-in QR.
+ * Smart TV 16:9 Caller — `/tv/branch/:branchId` or fallback `/tv/:branchSlug`.
+ * Left: Đang mời + vi-VN TTS. Right: bucket summary + walk-in QR.
  */
 
 import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import type { WsServerEvent } from '@luotdi/shared';
+import { tvCopy, type WsServerEvent } from '@luotdi/shared';
 import {
   BraunChassis,
   GridCell,
@@ -64,26 +64,32 @@ function speakViSummon(displayNumber: string) {
 }
 
 export function TvKioskPage() {
-  const { branchSlug } = useParams<{ branchSlug: string }>();
+  const { branchId, branchSlug } = useParams<{
+    branchId?: string;
+    branchSlug?: string;
+  }>();
   const [snapshot, setSnapshot] = useState<TvSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [summoning, setSummoning] = useState<string | null>(null);
 
   const loadSnapshot = useCallback(async () => {
-    if (!branchSlug) return;
+    if (!branchId && !branchSlug) return;
+    const url = branchId
+      ? `/api/branches/${branchId}/tv`
+      : `/api/branches/slug/${branchSlug}`;
     try {
-      const res = await fetch(`/api/branches/slug/${branchSlug}`);
+      const res = await fetch(url);
       if (!res.ok) {
-        setError('Failed to load TV snapshot');
+        setError('Không tải được màn hình TV.');
         return;
       }
       const data = (await res.json()) as TvSnapshot;
       setSnapshot(data);
       setError(null);
     } catch {
-      setError('Failed to load TV snapshot');
+      setError('Không tải được màn hình TV.');
     }
-  }, [branchSlug]);
+  }, [branchId, branchSlug]);
 
   useEffect(() => {
     void loadSnapshot();
@@ -126,10 +132,10 @@ export function TvKioskPage() {
     onEvent,
   });
 
-  if (!branchSlug) {
+  if (!branchId && !branchSlug) {
     return (
       <BraunChassis className="m-4 p-4">
-        <p className="font-mono text-sm text-carbon">Missing branch</p>
+        <p className="font-sans text-sm text-carbon">Thiếu chi nhánh.</p>
       </BraunChassis>
     );
   }
@@ -137,7 +143,7 @@ export function TvKioskPage() {
   if (error && !snapshot) {
     return (
       <BraunChassis className="m-4 p-4">
-        <p className="font-mono text-sm text-carbon">{error}</p>
+        <p className="font-sans text-sm text-carbon">{error}</p>
       </BraunChassis>
     );
   }
@@ -145,7 +151,7 @@ export function TvKioskPage() {
   if (!snapshot) {
     return (
       <BraunChassis className="m-4 p-4">
-        <p className="font-mono text-xs text-graphite tabular">LOADING</p>
+        <p className="font-sans text-sm text-carbon">Đang tải…</p>
       </BraunChassis>
     );
   }
@@ -166,11 +172,11 @@ export function TvKioskPage() {
             : 'flex w-1/2 flex-col justify-center border-r border-grid bg-ink p-8 text-panel'
         }
       >
-        <p className="font-mono text-xs uppercase tracking-widest tabular opacity-80">
+        <h1 className="font-sans text-2xl font-semibold tracking-tight">
           {snapshot.branchName}
-        </p>
+        </h1>
         <p className="mt-4 font-mono text-sm uppercase tracking-widest tabular">
-          NOW SUMMONING
+          {tvCopy.nowSummoning}
         </p>
         <div className="mt-6">
           <TabularMetric
@@ -195,7 +201,10 @@ export function TvKioskPage() {
                 key={bucket.id}
                 className="flex items-center justify-between border border-grid bg-chassis px-3 py-2"
               >
-                <GridCell label={bucket.labelVi} className="min-w-[96px]">
+                <GridCell
+                  label={`${tvCopy.tablePrefix} ${bucket.prefix}`}
+                  className="min-w-[96px]"
+                >
                   <TabularMetric
                     size="lg"
                     value={String(bucket.partiesWaiting)}

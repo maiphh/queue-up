@@ -1,6 +1,5 @@
 /**
- * Host POS Console — Phase 4.1 RED specs.
- * GREEN (AGENT-FRONTEND): implement HostPosPage so these pass.
+ * Host POS / Manager floor — Vietnamese accessible names + floor behavior.
  */
 
 import { render, screen, waitFor, within } from '@testing-library/react';
@@ -15,6 +14,7 @@ import {
   vi,
   type Mock,
 } from 'vitest';
+import { managerCopy } from '@luotdi/shared';
 import { HostPosPage } from '../modules/host-pos';
 
 /** Middle dot U+00B7 — display format prefix·NNN */
@@ -109,6 +109,33 @@ function mockFetchSnapshot(overrides: Partial<typeof SNAPSHOT_BASE> = {}) {
       return Response.json(payload);
     }
 
+    if (
+      method === 'POST' &&
+      (url.includes(`/api/branches/${BRANCH_ID}/pause`) ||
+        url.includes(`/api/host/branches/${BRANCH_ID}/pause`) ||
+        url.includes(`/api/host/${BRANCH_ID}/pause`))
+    ) {
+      return Response.json({
+        branchId: BRANCH_ID,
+        isPaused: true,
+        queueStatus: 'PAUSED',
+      });
+    }
+
+    if (method === 'POST' && url.includes('/api/tickets')) {
+      return Response.json({
+        id: 'ticket-walk-in',
+        displayNumber: `W${MIDDLE_DOT}001`,
+        status: 'WAITING',
+        bucketId: 'bucket-a',
+        seqNumber: 1,
+      });
+    }
+
+    if (method === 'PATCH' && url.includes('/api/host/tickets/')) {
+      return Response.json({ ok: true });
+    }
+
     return Response.json({ error: 'not mocked', url, method }, { status: 404 });
   });
 }
@@ -117,6 +144,7 @@ describe('Host POS — top bar', () => {
   let fetchMock: Mock;
 
   beforeEach(() => {
+    sessionStorage.clear();
     fetchMock = mockFetchSnapshot({
       tickets: [...WAITING_TICKETS],
       waitingCount: 2,
@@ -128,39 +156,55 @@ describe('Host POS — top bar', () => {
   });
 
   afterEach(() => {
+    sessionStorage.clear();
     vi.unstubAllGlobals();
     vi.clearAllMocks();
   });
 
-  it('displays live metrics WAITING, AVG WAIT, QUEUE STATUS plus PAUSE QUEUE and + WALK-IN', async () => {
+  it('displays live metrics Đang chờ, Chờ trung bình, Trạng thái plus Tạm dừng and Khách đến quầy', async () => {
     renderHostPos();
 
     const topBar = await screen.findByTestId('host-pos-top-bar');
 
+    expect(within(topBar).getByText(managerCopy.eyebrow)).toBeInTheDocument();
+    expect(
+      within(topBar).getByRole('heading', { name: SNAPSHOT_BASE.branchName }),
+    ).toBeInTheDocument();
+
     const metrics = within(topBar).getByTestId('host-pos-metrics');
-    expect(within(metrics).getByText(/WAITING/i)).toBeInTheDocument();
-    expect(within(metrics).getByText(/AVG\s*WAIT/i)).toBeInTheDocument();
-    expect(within(metrics).getByText(/QUEUE\s*STATUS/i)).toBeInTheDocument();
+    expect(
+      within(metrics).getByText(managerCopy.metricWaiting),
+    ).toBeInTheDocument();
+    expect(
+      within(metrics).getByText(managerCopy.metricAvgWait),
+    ).toBeInTheDocument();
+    expect(
+      within(metrics).getByText(managerCopy.metricStatus),
+    ).toBeInTheDocument();
 
     expect(within(metrics).getByText('2')).toBeInTheDocument();
     expect(within(metrics).getByText(/14\s*min/i)).toBeInTheDocument();
-    expect(within(metrics).getByText(/OPEN/i)).toBeInTheDocument();
+    expect(
+      within(metrics).getByText(managerCopy.statusOpen),
+    ).toBeInTheDocument();
 
     expect(
-      within(topBar).getByRole('button', { name: /PAUSE\s*QUEUE/i }),
+      within(topBar).getByRole('button', { name: managerCopy.pause }),
     ).toBeInTheDocument();
     expect(
-      within(topBar).getByRole('button', { name: /\+\s*WALK-IN/i }),
+      within(topBar).getByRole('button', { name: managerCopy.walkIn }),
     ).toBeInTheDocument();
+
+    expect(screen.queryByTestId('admin-view-banner')).not.toBeInTheDocument();
   });
 
-  it('PAUSE QUEUE toggles and + WALK-IN opens the walk-in modal', async () => {
+  it('Tạm dừng calls pause endpoint and Khách đến quầy opens the walk-in modal', async () => {
     const user = userEvent.setup();
     renderHostPos();
 
     const topBar = await screen.findByTestId('host-pos-top-bar');
     const pauseBtn = within(topBar).getByRole('button', {
-      name: /PAUSE\s*QUEUE/i,
+      name: managerCopy.pause,
     });
     await user.click(pauseBtn);
 
@@ -176,14 +220,68 @@ describe('Host POS — top bar', () => {
     });
 
     await user.click(
-      within(topBar).getByRole('button', { name: /\+\s*WALK-IN/i }),
+      within(topBar).getByRole('button', { name: managerCopy.walkIn }),
     );
     expect(await screen.findByTestId('walk-in-modal')).toBeInTheDocument();
+  });
+
+  it('POST /api/tickets with HOST_MANUAL when walk-in form is submitted', async () => {
+    const user = userEvent.setup();
+    renderHostPos();
+
+    const topBar = await screen.findByTestId('host-pos-top-bar');
+    await user.click(
+      within(topBar).getByRole('button', { name: managerCopy.walkIn }),
+    );
+
+    const modal = await screen.findByTestId('walk-in-modal');
+    const nameInput = within(modal).getByRole('textbox', {
+      name: /Tên khách/i,
+    });
+    await user.clear(nameInput);
+    await user.type(nameInput, 'Nguyen Walk');
+
+    const submitButtons = within(modal).getAllByRole('button', {
+      name: managerCopy.walkIn,
+    });
+    await user.click(submitButtons[0]!);
+
+    await waitFor(() => {
+      const postCall = fetchMock.mock.calls.find(([input, init]) => {
+        const url = String(input);
+        const method = String(init?.method ?? 'GET').toUpperCase();
+        return method === 'POST' && url.includes('/api/tickets');
+      });
+      expect(postCall).toBeTruthy();
+      const body = JSON.parse(String(postCall![1]?.body ?? '{}')) as {
+        branchId: string;
+        customerName: string;
+        paxCount: number;
+        source: string;
+      };
+      expect(body).toEqual(
+        expect.objectContaining({
+          branchId: BRANCH_ID,
+          customerName: 'Nguyen Walk',
+          paxCount: 2,
+          source: 'HOST_MANUAL',
+        }),
+      );
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('walk-in-modal')).not.toBeInTheDocument();
+    });
   });
 });
 
 describe('Host POS — pinned summoned strip', () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+  });
+
   afterEach(() => {
+    sessionStorage.clear();
     vi.unstubAllGlobals();
     vi.clearAllMocks();
   });
@@ -202,7 +300,7 @@ describe('Host POS — pinned summoned strip', () => {
     expect(screen.queryByTestId('summoned-strip')).not.toBeInTheDocument();
   });
 
-  it('appears with SEAT GUEST and HOLD 10M when >=1 CALLED ticket', async () => {
+  it('appears with Đã đến and Giữ chỗ when >=1 CALLED ticket', async () => {
     vi.stubGlobal(
       'fetch',
       mockFetchSnapshot({
@@ -215,10 +313,10 @@ describe('Host POS — pinned summoned strip', () => {
     const strip = await screen.findByTestId('summoned-strip');
     expect(within(strip).getByText(DISPLAY_B003)).toBeInTheDocument();
     expect(
-      within(strip).getByRole('button', { name: /SEAT\s*GUEST/i }),
+      within(strip).getByRole('button', { name: managerCopy.seat }),
     ).toBeInTheDocument();
     expect(
-      within(strip).getByRole('button', { name: /HOLD\s*10M/i }),
+      within(strip).getByRole('button', { name: managerCopy.hold }),
     ).toBeInTheDocument();
   });
 });
@@ -227,6 +325,7 @@ describe('Host POS — waiting ledger', () => {
   let fetchMock: Mock;
 
   beforeEach(() => {
+    sessionStorage.clear();
     fetchMock = mockFetchSnapshot({
       tickets: [...WAITING_TICKETS],
       waitingCount: 2,
@@ -235,11 +334,12 @@ describe('Host POS — waiting ledger', () => {
   });
 
   afterEach(() => {
+    sessionStorage.clear();
     vi.unstubAllGlobals();
     vi.clearAllMocks();
   });
 
-  it('shows a single primary SUMMON button per waiting row', async () => {
+  it('shows a single primary Gọi button per waiting row', async () => {
     renderHostPos();
 
     const ledger = await screen.findByTestId('waiting-ledger');
@@ -248,18 +348,18 @@ describe('Host POS — waiting ledger', () => {
 
     for (const row of rows) {
       const summonButtons = within(row).getAllByRole('button', {
-        name: /^SUMMON$/i,
+        name: managerCopy.summon,
       });
       expect(summonButtons).toHaveLength(1);
-      // Progressive disclosure: no Seat / Hold / Cancel as primary row actions
+      // Progressive disclosure: no seat / hold / cancel as primary row actions
       expect(
-        within(row).queryByRole('button', { name: /SEAT\s*GUEST/i }),
+        within(row).queryByRole('button', { name: managerCopy.seat }),
       ).not.toBeInTheDocument();
       expect(
-        within(row).queryByRole('button', { name: /HOLD\s*10M/i }),
+        within(row).queryByRole('button', { name: managerCopy.hold }),
       ).not.toBeInTheDocument();
       expect(
-        within(row).queryByRole('button', { name: /^Cancel$/i }),
+        within(row).queryByRole('button', { name: managerCopy.cancel }),
       ).not.toBeInTheDocument();
     }
 
@@ -267,40 +367,42 @@ describe('Host POS — waiting ledger', () => {
     expect(within(ledger).getByText(DISPLAY_A015)).toBeInTheDocument();
   });
 
-  it('keeps Bump Priority, Change Party Size, Cancel inside MORE row action drawer', async () => {
+  it('keeps Ưu tiên, Đổi số khách, Hủy số inside Thêm row action drawer', async () => {
     const user = userEvent.setup();
     renderHostPos();
 
     const ledger = await screen.findByTestId('waiting-ledger');
     const row = within(ledger).getByTestId('waiting-row-ticket-a014');
 
-    // Geometric label — MORE or ... (no emoji)
     const moreBtn = within(row).getByRole('button', {
-      name: /^(MORE|\.\.\.)$/i,
+      name: managerCopy.more,
     });
     expect(moreBtn).toBeInTheDocument();
 
     expect(
-      within(row).queryByRole('button', { name: /Bump\s*Priority/i }),
+      within(row).queryByRole('button', { name: managerCopy.bump }),
     ).not.toBeInTheDocument();
     expect(
-      within(row).queryByRole('button', { name: /Change\s*Party\s*Size/i }),
+      within(row).queryByRole('button', { name: managerCopy.changeParty }),
     ).not.toBeInTheDocument();
     expect(
-      within(row).queryByRole('button', { name: /^Cancel$/i }),
+      within(row).queryByRole('button', { name: managerCopy.cancel }),
     ).not.toBeInTheDocument();
 
     await user.click(moreBtn);
 
     const drawer = await screen.findByTestId('row-action-drawer');
     expect(
-      within(drawer).getByRole('button', { name: /Bump\s*Priority/i }),
+      within(drawer).getByRole('button', { name: managerCopy.bump }),
     ).toBeInTheDocument();
     expect(
-      within(drawer).getByRole('button', { name: /Change\s*Party\s*Size/i }),
+      within(drawer).getByRole('button', { name: managerCopy.changeParty }),
     ).toBeInTheDocument();
     expect(
-      within(drawer).getByRole('button', { name: /^Cancel$/i }),
+      within(drawer).getByRole('button', { name: managerCopy.cancel }),
+    ).toBeInTheDocument();
+    expect(
+      within(drawer).getByRole('button', { name: managerCopy.close }),
     ).toBeInTheDocument();
   });
 });

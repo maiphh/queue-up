@@ -1,11 +1,11 @@
 /**
- * Merchant Owner Config — `/admin`.
- * Bucket editor (A–F), VietQR top-up memo LUOTDI <slug>, printable QR standee.
+ * Client portfolio `/client` and branch setup `/client/branches/:branchId`.
+ * Bucket editor, VietQR top-up memo LUOTDI <slug>, printable QR standee.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useParams } from 'react-router-dom';
-import { buildVietQrMemo } from '@luotdi/shared';
+import { useNavigate, useParams } from 'react-router-dom';
+import { buildVietQrMemo, clientCopy } from '@luotdi/shared';
 import {
   BraunChassis,
   GridCell,
@@ -41,6 +41,29 @@ type OwnerConfig = {
   };
 };
 
+type PortfolioBranch = {
+  id: string;
+  name: string;
+  district: string;
+  waitingCount: number;
+  isPaused: boolean;
+  queueStatus: string;
+};
+
+type PortfolioBrand = {
+  id: string;
+  name: string;
+  slug: string;
+  industryType: string;
+  branches: PortfolioBranch[];
+};
+
+type ClientPortfolio = {
+  clientId: string;
+  clientName: string;
+  brands: PortfolioBrand[];
+};
+
 const PREFIX_ORDER = ['A', 'B', 'C', 'D', 'E', 'F'] as const;
 
 function nextPrefix(existing: AdminBucket[]): string | null {
@@ -63,8 +86,125 @@ function buildVietQrUrl(opts: {
   return `https://img.vietqr.io/image/${encodeURIComponent(opts.bankCode)}-${encodeURIComponent(opts.accountNumber)}-compact.png?${params.toString()}`;
 }
 
-export function OwnerAdminPage() {
-  const { branchId: routeBranchId } = useParams<{ branchId?: string }>();
+function ClientPortfolioView() {
+  const navigate = useNavigate();
+  const [portfolio, setPortfolio] = useState<ClientPortfolio | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadPortfolio = useCallback(async () => {
+    try {
+      const res = await fetch('/api/client/portfolio');
+      if (!res.ok) {
+        setError('Không tải được danh sách thương hiệu.');
+        return;
+      }
+      const data = (await res.json()) as ClientPortfolio;
+      setPortfolio(data);
+      setError(null);
+    } catch {
+      setError('Không tải được danh sách thương hiệu.');
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadPortfolio();
+  }, [loadPortfolio]);
+
+  if (error && !portfolio) {
+    return (
+      <BraunChassis className="m-4 p-4">
+        <p className="font-sans text-sm text-carbon">{error}</p>
+      </BraunChassis>
+    );
+  }
+
+  if (!portfolio) {
+    return (
+      <BraunChassis className="m-4 p-4">
+        <p className="font-sans text-sm text-graphite">Đang tải.</p>
+      </BraunChassis>
+    );
+  }
+
+  return (
+    <div
+      data-page="client-portfolio"
+      className="flex min-h-screen flex-col bg-chassis text-carbon"
+    >
+      <header className="border-b border-grid bg-panel px-4 py-3">
+        <p className="font-mono text-[10px] uppercase tracking-widest text-graphite tabular">
+          Client
+        </p>
+        <h1 className="font-sans text-base font-semibold text-carbon">
+          {portfolio.clientName}
+        </h1>
+      </header>
+
+      <section className="m-4" data-testid="client-brands">
+        <p className="mb-3 font-mono text-[10px] uppercase tracking-widest text-graphite tabular">
+          {clientCopy.brands}
+        </p>
+        <div className="flex flex-col gap-4">
+          {portfolio.brands.map((brand) => (
+            <GridCell key={brand.id} label={brand.slug}>
+              <h2 className="mb-3 font-sans text-base font-semibold text-carbon">
+                {brand.name}
+              </h2>
+              <ul className="flex flex-col gap-3">
+                {brand.branches.map((branch) => {
+                  const statusLabel = branch.isPaused
+                    ? clientCopy.statusPaused
+                    : clientCopy.statusOpen;
+                  return (
+                    <li
+                      key={branch.id}
+                      data-testid={`portfolio-branch-${branch.id}`}
+                      className="border border-grid bg-chassis p-3"
+                    >
+                      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+                        <p className="font-sans text-sm font-semibold text-carbon">
+                          {branch.name}
+                        </p>
+                        <p className="font-mono text-[10px] uppercase tracking-widest text-graphite tabular">
+                          {statusLabel}
+                        </p>
+                      </div>
+                      <p className="mb-3 font-mono text-xs text-graphite tabular">
+                        Đang chờ{' '}
+                        <TabularMetric
+                          size="md"
+                          value={String(branch.waitingCount)}
+                        />
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        <KeycapButton
+                          variant="primary"
+                          onClick={() => navigate(`/manage/${branch.id}`)}
+                        >
+                          {clientCopy.viewFloor}
+                        </KeycapButton>
+                        <KeycapButton
+                          variant="secondary"
+                          onClick={() =>
+                            navigate(`/client/branches/${branch.id}`)
+                          }
+                        >
+                          {clientCopy.setup}
+                        </KeycapButton>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </GridCell>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function BranchSetupView({ branchId }: { branchId: string }) {
   const [config, setConfig] = useState<OwnerConfig | null>(null);
   const [buckets, setBuckets] = useState<AdminBucket[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -73,12 +213,10 @@ export function OwnerAdminPage() {
 
   const loadConfig = useCallback(async () => {
     try {
-      const qs = routeBranchId
-        ? `?branchId=${encodeURIComponent(routeBranchId)}`
-        : '';
+      const qs = `?branchId=${encodeURIComponent(branchId)}`;
       const res = await fetch(`/api/admin/config${qs}`);
       if (!res.ok) {
-        setError('Failed to load owner config');
+        setError('Không tải được cấu hình chi nhánh.');
         return;
       }
       const data = (await res.json()) as OwnerConfig;
@@ -86,9 +224,9 @@ export function OwnerAdminPage() {
       setBuckets(data.buckets.map((b) => ({ ...b })));
       setError(null);
     } catch {
-      setError('Failed to load owner config');
+      setError('Không tải được cấu hình chi nhánh.');
     }
-  }, [routeBranchId]);
+  }, [branchId]);
 
   useEffect(() => {
     void loadConfig();
@@ -140,7 +278,7 @@ export function OwnerAdminPage() {
 
   const saveBuckets = useCallback(async () => {
     try {
-      await fetch('/api/admin/buckets', {
+      const res = await fetch('/api/admin/buckets', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -157,9 +295,14 @@ export function OwnerAdminPage() {
           })),
         }),
       });
+      if (!res.ok) {
+        setError('Không lưu được bàn.');
+        return;
+      }
+      setError(null);
       await loadConfig();
     } catch {
-      /* mock-safe */
+      setError('Không lưu được bàn.');
     }
   }, [buckets, config?.branchId, loadConfig]);
 
@@ -178,7 +321,7 @@ export function OwnerAdminPage() {
   if (error && !config) {
     return (
       <BraunChassis className="m-4 p-4">
-        <p className="font-mono text-sm text-carbon">{error}</p>
+        <p className="font-sans text-sm text-carbon">{error}</p>
       </BraunChassis>
     );
   }
@@ -186,7 +329,7 @@ export function OwnerAdminPage() {
   if (!config) {
     return (
       <BraunChassis className="m-4 p-4">
-        <p className="font-mono text-xs text-graphite tabular">LOADING</p>
+        <p className="font-sans text-sm text-graphite">Đang tải.</p>
       </BraunChassis>
     );
   }
@@ -198,12 +341,16 @@ export function OwnerAdminPage() {
     >
       <header className="border-b border-grid bg-panel px-4 py-3">
         <p className="font-mono text-[10px] uppercase tracking-widest text-graphite tabular">
-          OWNER ADMIN
+          {config.merchantName}
         </p>
         <h1 className="font-sans text-base font-semibold text-carbon">
-          {config.merchantName} / {config.branchName}
+          {config.branchName}
         </h1>
       </header>
+
+      {error ? (
+        <p className="mx-4 mt-3 font-sans text-sm text-carbon">{error}</p>
+      ) : null}
 
       <div className="grid flex-1 gap-4 p-4 lg:grid-cols-2">
         <section
@@ -222,23 +369,23 @@ export function OwnerAdminPage() {
               >
                 <div className="mb-2 flex items-center gap-2">
                   <label className="font-mono text-[10px] uppercase tracking-widest text-graphite">
-                    PREFIX
+                    {clientCopy.prefix}
                     <input
                       className="ml-2 min-h-[48px] w-12 border border-grid bg-panel px-2 font-mono text-sm tabular"
                       value={bucket.prefix}
                       readOnly
-                      aria-label="PREFIX"
+                      aria-label={clientCopy.prefix}
                     />
                   </label>
                 </div>
                 <div className="flex flex-wrap gap-3">
                   <label className="font-mono text-[10px] uppercase tracking-widest text-graphite">
-                    MIN PAX
+                    {clientCopy.minPax}
                     <input
                       type="number"
                       className="mt-1 block min-h-[48px] w-20 border border-grid bg-panel px-2 font-mono text-sm tabular"
                       value={bucket.minPax}
-                      aria-label="MIN PAX"
+                      aria-label={clientCopy.minPax}
                       onChange={(e) =>
                         updateBucketField(
                           bucket.prefix,
@@ -249,12 +396,12 @@ export function OwnerAdminPage() {
                     />
                   </label>
                   <label className="font-mono text-[10px] uppercase tracking-widest text-graphite">
-                    MAX PAX
+                    {clientCopy.maxPax}
                     <input
                       type="number"
                       className="mt-1 block min-h-[48px] w-20 border border-grid bg-panel px-2 font-mono text-sm tabular"
                       value={bucket.maxPax}
-                      aria-label="MAX PAX"
+                      aria-label={clientCopy.maxPax}
                       onChange={(e) =>
                         updateBucketField(
                           bucket.prefix,
@@ -265,12 +412,12 @@ export function OwnerAdminPage() {
                     />
                   </label>
                   <label className="font-mono text-[10px] uppercase tracking-widest text-graphite">
-                    ACTIVE COUNTERS
+                    {clientCopy.counters}
                     <input
                       type="number"
                       className="mt-1 block min-h-[48px] w-20 border border-grid bg-panel px-2 font-mono text-sm tabular"
                       value={bucket.activeCounters}
-                      aria-label="ACTIVE COUNTERS"
+                      aria-label={clientCopy.counters}
                       onChange={(e) =>
                         updateBucketField(
                           bucket.prefix,
@@ -290,10 +437,10 @@ export function OwnerAdminPage() {
               onClick={addBucket}
               disabled={!nextPrefix(buckets)}
             >
-              ADD BUCKET
+              {clientCopy.addBucket}
             </KeycapButton>
             <KeycapButton variant="primary" onClick={() => void saveBuckets()}>
-              SAVE BUCKETS
+              {clientCopy.save}
             </KeycapButton>
           </div>
         </section>
@@ -302,10 +449,7 @@ export function OwnerAdminPage() {
           data-testid="vietqr-topup"
           className="border border-grid bg-panel p-4"
         >
-          <p className="mb-3 font-mono text-[10px] uppercase tracking-widest text-graphite tabular">
-            VIETQR TOP-UP
-          </p>
-          <GridCell label="WALLET BALANCE" className="mb-3">
+          <GridCell label={clientCopy.wallet} className="mb-3">
             <TabularMetric
               size="lg"
               value={`${config.walletBalanceVnd.toLocaleString('en-US')} VND`}
@@ -321,17 +465,17 @@ export function OwnerAdminPage() {
             {memo}
           </p>
           <label className="font-mono text-[10px] uppercase tracking-widest text-graphite">
-            AMOUNT VND
+            Số tiền VND
             <input
               type="number"
               className="mt-1 mb-3 block min-h-[48px] w-full border border-grid bg-chassis px-3 font-mono text-sm tabular"
               value={topUpAmount}
-              aria-label="AMOUNT VND"
+              aria-label="Số tiền VND"
               onChange={(e) => setTopUpAmount(e.target.value)}
             />
           </label>
           <KeycapButton variant="primary" onClick={generateVietQr}>
-            GENERATE QR
+            {clientCopy.createTransfer}
           </KeycapButton>
           {vietQrUrl ? (
             <div
@@ -375,4 +519,14 @@ export function OwnerAdminPage() {
       </section>
     </div>
   );
+}
+
+export function OwnerAdminPage() {
+  const { branchId: routeBranchId } = useParams<{ branchId?: string }>();
+
+  if (!routeBranchId) {
+    return <ClientPortfolioView />;
+  }
+
+  return <BranchSetupView branchId={routeBranchId} />;
 }

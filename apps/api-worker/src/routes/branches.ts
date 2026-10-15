@@ -1,12 +1,17 @@
 import { calculateEstimatedWait } from '@luotdi/shared';
 import { Hono } from 'hono';
 import type { Env } from '../index';
+import { assertBranchAccess, readActor } from '../services';
 
 /**
  * Branch-scoped routes.
  * Specific paths must be registered before `/:branchId/ws`.
  */
 const branches = new Hono<{ Bindings: Env }>();
+
+function apiError(error: string, code: string) {
+  return { error, code };
+}
 
 type BranchJoinRow = {
   id: string;
@@ -263,6 +268,36 @@ branches.get('/slug/:slug', async (c) => {
   });
 });
 
+/** GET /api/branches/:branchId/tv — TV for one branch (no LIMIT 1 by merchant) */
+branches.get('/:branchId/tv', async (c) => {
+  const branchId = c.req.param('branchId');
+  const branch = await loadBranchById(c.env.DB, branchId);
+  if (!branch) {
+    return c.json({ error: 'Branch not found', code: 'BRANCH_NOT_FOUND' }, 404);
+  }
+
+  const buckets = await loadBuckets(c.env.DB, branch.id);
+  const bucketPayload = [];
+  for (const bucket of buckets) {
+    const live = await bucketLiveMetrics(c.env.DB, branch.id, bucket);
+    bucketPayload.push({
+      id: bucket.id,
+      prefix: bucket.prefix,
+      labelVi: bucket.label_vi,
+      partiesWaiting: live.partiesWaiting,
+      estimatedWaitMins: live.estimatedWaitMins,
+    });
+  }
+
+  return c.json({
+    branchId: branch.id,
+    branchName: branch.name,
+    branchSlug: branch.merchant_slug,
+    walkInQrUrl: `https://zalo.me/app/link?qr=${encodeURIComponent(branch.qr_code_token)}`,
+    buckets: bucketPayload,
+  });
+});
+
 /** GET /api/branches/:branchId/snapshot — Host POS */
 branches.get('/:branchId/snapshot', async (c) => {
   const branchId = c.req.param('branchId');
@@ -319,10 +354,24 @@ branches.get('/:branchId/snapshot', async (c) => {
 
 /** POST /api/branches/:branchId/pause — toggle pause */
 branches.post('/:branchId/pause', async (c) => {
+  const actorResult = readActor(c.req.raw.headers);
+  if (!actorResult.ok) {
+    return c.json(apiError('Staff authentication required', actorResult.code), 401);
+  }
+
   const branchId = c.req.param('branchId');
   const branch = await loadBranchById(c.env.DB, branchId);
   if (!branch) {
     return c.json({ error: 'Branch not found', code: 'BRANCH_NOT_FOUND' }, 404);
+  }
+
+  const access = await assertBranchAccess(
+    c.env.DB,
+    actorResult.actor,
+    branchId,
+  );
+  if (access !== true) {
+    return c.json(apiError('Insufficient staff role', access.code), access.status);
   }
 
   let nextPaused = branch.is_paused === 1 ? 0 : 1;
