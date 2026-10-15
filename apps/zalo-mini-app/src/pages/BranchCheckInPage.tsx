@@ -342,7 +342,7 @@ export function BranchCheckInPage() {
       {identity.status === 'error' ? (
         <div data-testid="identity-error" className="zma-errrow">
           <BeVe pose="offline" size={36} />
-          <p style={{ flex: 1 }}>{guestCopy.authFailed}</p>
+          <p style={{ flex: 1 }}>{identity.error || guestCopy.authFailed}</p>
           <button type="button" className="d-pill" onClick={identity.retry}>{guestCopy.retry}</button>
         </div>
       ) : null}

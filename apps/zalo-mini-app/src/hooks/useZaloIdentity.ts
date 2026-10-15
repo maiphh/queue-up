@@ -80,7 +80,11 @@ async function exchange(path: string, body: unknown): Promise<AuthResponse> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(`auth ${res.status}`);
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as { zaloMessage?: unknown } | null;
+    const detail = typeof body?.zaloMessage === 'string' ? body.zaloMessage.trim() : '';
+    throw new Error(detail || `auth ${res.status}`);
+  }
   return (await res.json()) as AuthResponse;
 }
 
@@ -154,13 +158,15 @@ export function useZaloIdentity(): ZaloIdentity {
         cacheToken(token);
         setState({ status: 'ready', customerName: guest.name ?? 'Khách', error: null });
       })
-      .catch(() => {
+      .catch((err: unknown) => {
         if (cancelled) return;
         setSessionToken(null);
+        const detail = err instanceof Error ? err.message.trim() : '';
+        const fromZalo = detail && !detail.startsWith('auth ') && detail !== 'timeout' && detail !== 'no zalo access token';
         setState({
           status: 'error',
           customerName: 'Khách',
-          error: 'Không xác thực được tài khoản Zalo.',
+          error: fromZalo ? detail : 'Không xác thực được tài khoản Zalo.',
         });
       });
 

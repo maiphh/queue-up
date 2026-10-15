@@ -1,8 +1,11 @@
+/* Zalo drops index.html, and listCSS may only name files inside www. */
+@import url('https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&family=Lexend:wght@500;600;700;800&family=JetBrains+Mono:wght@600&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-html, body, #root { min-height: 100%; }
+html, body, #app { min-height: 100%; }
 body { margin: 0; background: var(--d-cream); }
 
 /* Guest app layout (Style D). Primitives live in @luotdi/design-d/styles.css. */

@@ -1,8 +1,13 @@
 {
   "app": {
     "title": "LượtĐi",
+    "headerTitle": { "vi": "LượtĐi", "en": "LuotDi" },
     "headerColor": "#111111",
     "textColor": "white",
-    "actionBarHidden": true
-  }
+    "actionBarHidden": true,
+    "selfControlLoading": false
+  },
+  "listCSS": [],
+  "listSyncJS": [],
+  "listAsyncJS": []
 }

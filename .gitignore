@@ -1,5 +1,7 @@
 node_modules
 dist
+www
+app-config.www.json
 .turbo
 .wrangler
 .dev.vars

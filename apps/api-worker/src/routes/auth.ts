@@ -28,15 +28,29 @@ auth.post('/zalo', async (c) => {
     return c.json(apiError('accessToken required', 'INVALID_BODY'), 400);
   }
 
-  let profile;
+  let result;
   try {
-    profile = await fetchZaloProfile(body.accessToken, c.env.ZALO_APP_SECRET);
-  } catch {
-    profile = null;
+    result = await fetchZaloProfile(body.accessToken, c.env.ZALO_APP_SECRET);
+  } catch (err) {
+    const zaloMessage = err instanceof Error ? err.message : 'graph request failed';
+    console.error('[auth/zalo] graph request threw', zaloMessage);
+    return c.json(
+      { ...apiError('Zalo token rejected', 'ZALO_AUTH_FAILED'), zaloError: null, zaloMessage },
+      401,
+    );
   }
-  if (!profile) {
-    return c.json(apiError('Zalo token rejected', 'ZALO_AUTH_FAILED'), 401);
+  if (!result.ok) {
+    console.error('[auth/zalo] graph rejected', result.zaloError, result.zaloMessage);
+    return c.json(
+      {
+        ...apiError('Zalo token rejected', 'ZALO_AUTH_FAILED'),
+        zaloError: result.zaloError,
+        zaloMessage: result.zaloMessage,
+      },
+      401,
+    );
   }
+  const profile = result.profile;
 
   const guestId = await upsertGuestUser(c.env.DB, profile);
   const token = await signGuestJwt(c.env.JWT_SECRET, {

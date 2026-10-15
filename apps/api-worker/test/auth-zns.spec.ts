@@ -3,7 +3,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import '../src/index';
 import { ZnsDispatcherService } from '../src/services';
 import { hmacSha256Hex, signGuestJwt, verifyGuestJwt } from '../src/services/jwt';
-import { ZALO_GRAPH_ME_URL } from '../src/services/zalo-auth';
+import { fetchZaloProfile, ZALO_GRAPH_ME_URL } from '../src/services/zalo-auth';
 import { toZnsPhone, ZaloZnsSender, ZNS_TEMPLATE_URL } from '../src/services/zns-sender';
 
 async function applySchema(db: D1Database, sql: string): Promise<void> {
@@ -77,6 +77,34 @@ describe('POST /api/auth/zalo', () => {
       body: JSON.stringify({ accessToken: 'bad' }),
     });
     expect(res.status).toBe(401);
+    expect(await res.json()).toMatchObject({
+      code: 'ZALO_AUTH_FAILED',
+      zaloError: 452,
+      zaloMessage: 'Invalid access token',
+    });
+  });
+
+  it('accepts the user id when Zalo withholds personal fields outside Vietnam', async () => {
+    const fetchImpl = vi.fn(async () =>
+      Response.json({
+        id: 'z-vn',
+        error: -501,
+        message: 'Personal information is limited due to IP address not inside Vietnam',
+      }),
+    );
+    const result = await fetchZaloProfile('tok', 'secret', fetchImpl);
+    expect(result).toEqual({ ok: true, profile: { id: 'z-vn' } });
+    expect(String(fetchImpl.mock.calls[0]?.[0])).toBe(ZALO_GRAPH_ME_URL);
+    expect(ZALO_GRAPH_ME_URL).not.toContain('name');
+  });
+
+  it('trims a newline off the app secret before signing the proof', async () => {
+    const fetchImpl = vi.fn(async () => Response.json({ id: 'z1', error: 0, message: 'Success' }));
+    const result = await fetchZaloProfile(' tok \n', ' secret \r\n', fetchImpl);
+    expect(result.ok).toBe(true);
+    const headers = fetchImpl.mock.calls[0]?.[1]?.headers as Record<string, string>;
+    expect(headers.access_token).toBe('tok');
+    expect(headers.appsecret_proof).toBe(await hmacSha256Hex('secret', 'tok'));
   });
 });
 

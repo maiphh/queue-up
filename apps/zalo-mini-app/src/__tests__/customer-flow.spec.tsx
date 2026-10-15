@@ -568,7 +568,7 @@ describe('Lấy số button — regression for "cannot tap" in Zalo', () => {
     const user = userEvent.setup();
     renderApp(`/b/${QR_TOKEN}`);
     await screen.findByRole('heading', { name: /Pho 24/ });
-    expect(screen.getByTestId('identity-error')).toHaveTextContent(guestCopy.authFailed);
+    expect(screen.getByTestId('identity-error')).toHaveTextContent('x');
     await user.click(screen.getByRole('button', { name: guestCopy.retry }));
     expect(retry).toHaveBeenCalled();
   });
@@ -688,7 +688,7 @@ describe('Owner-only ticket read', () => {
     vi.stubGlobal('fetch', mockFetchRouter());
     const user = userEvent.setup();
     renderApp(`/ticket/${TICKET_ID}`);
-    expect(await screen.findByTestId('identity-error')).toHaveTextContent(guestCopy.authFailed);
+    expect(await screen.findByTestId('identity-error')).toHaveTextContent('x');
     await user.click(screen.getByRole('button', { name: guestCopy.retry }));
     expect(retry).toHaveBeenCalled();
   });

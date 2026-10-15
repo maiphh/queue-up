@@ -4,9 +4,9 @@ import { App } from './App';
 import '@luotdi/design-d/styles.css';
 import './index.css';
 
-const root = document.getElementById('root');
+const root = document.getElementById('app');
 if (!root) {
-  throw new Error('Root element #root not found');
+  throw new Error('Root element #app not found');
 }
 
 createRoot(root).render(

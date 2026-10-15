@@ -1,37 +1,81 @@
 import { hmacSha256Hex } from './jwt';
 
-export const ZALO_GRAPH_ME_URL = 'https://graph.zalo.me/v2.0/me?fields=id,name,picture';
+/**
+ * `id` only. Since 2024-02-29 Zalo returns name, avatar, and phone solely to
+ * Vietnam IPs. Cloudflare egress is outside Vietnam, so requesting those
+ * fields fails the whole call with "Personal information is limited…".
+ */
+export const ZALO_GRAPH_ME_URL = 'https://graph.zalo.me/v2.0/me?fields=id';
 
 export type ZaloProfile = { id: string; name?: string; avatarUrl?: string };
 
+export type ZaloProfileResult =
+  | { ok: true; profile: ZaloProfile }
+  | { ok: false; zaloError: number | null; zaloMessage: string };
+
 type GraphMe = {
-  id?: string;
+  id?: string | number;
   name?: string;
   picture?: { data?: { url?: string } };
-  error?: number;
+  error?: number | string;
   message?: string;
 };
+
+/** wrangler secret put on Windows often keeps a trailing newline. Zalo then rejects every proof. */
+function cleanSecret(value: string): string {
+  return value.replace(/^\uFEFF/, '').trim();
+}
 
 /**
  * Exchange a Mini App `getAccessToken()` token for the Zalo profile.
  * Sends `appsecret_proof = HMAC_SHA256(accessToken, ZALO_APP_SECRET)` (hex).
- * Returns null on any Graph error.
  */
 export async function fetchZaloProfile(
   accessToken: string,
   appSecret: string,
   fetchImpl: typeof fetch = fetch,
-): Promise<ZaloProfile | null> {
+): Promise<ZaloProfileResult> {
+  const token = cleanSecret(accessToken);
+  const secret = cleanSecret(appSecret);
+  if (!token || !secret) {
+    return { ok: false, zaloError: null, zaloMessage: 'empty token or secret' };
+  }
   const res = await fetchImpl(ZALO_GRAPH_ME_URL, {
     headers: {
-      access_token: accessToken,
-      appsecret_proof: await hmacSha256Hex(appSecret, accessToken),
+      access_token: token,
+      appsecret_proof: await hmacSha256Hex(secret, token),
     },
   });
-  if (!res.ok) return null;
-  const me = (await res.json()) as GraphMe;
-  if (!me.id || (me.error !== undefined && me.error !== 0)) return null;
-  return { id: me.id, name: me.name, avatarUrl: me.picture?.data?.url };
+  let me: GraphMe;
+  try {
+    me = (await res.json()) as GraphMe;
+  } catch {
+    return { ok: false, zaloError: res.status, zaloMessage: `graph HTTP ${res.status}` };
+  }
+  const code =
+    me.error === undefined || me.error === null || me.error === '' ? null : Number(me.error);
+  const id = me.id === undefined || me.id === null ? '' : String(me.id);
+  // An id is enough to sign in. A non-zero code here is Zalo withholding
+  // name/avatar from a non-Vietnam IP, not a rejected token.
+  if (id) {
+    return {
+      ok: true,
+      profile: {
+        id,
+        ...(me.name ? { name: me.name } : {}),
+        ...(me.picture?.data?.url ? { avatarUrl: me.picture.data.url } : {}),
+      },
+    };
+  }
+  const zaloMessage =
+    typeof me.message === 'string' && me.message.trim()
+      ? me.message.trim().slice(0, 200)
+      : `graph HTTP ${res.status}`;
+  return {
+    ok: false,
+    zaloError: code !== null && Number.isFinite(code) ? code : res.status,
+    zaloMessage,
+  };
 }
 
 /** Upsert by zalo_user_id; returns guest_users.id. */

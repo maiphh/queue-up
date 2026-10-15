@@ -197,7 +197,7 @@ export function LivePassPage() {
     return (
       <section className="zma-page zma-center" data-testid="identity-error">
         <BeVe pose="offline" size={140} />
-        <p className="d-bubble">{guestCopy.authFailed}</p>
+        <p className="d-bubble">{identity.error || guestCopy.authFailed}</p>
         <button type="button" className="d-btn d-btn-yellow" onClick={identity.retry}>{guestCopy.retry}</button>
       </section>
     );

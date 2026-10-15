@@ -5,7 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && node ./scripts/sync-zmp-assets.mjs",
+    "sync:zmp": "node ./scripts/sync-zmp-assets.mjs",
+    "restore:zmp-config": "node ./scripts/restore-zmp-app-config.mjs",
+    "deploy:dev": "node ./scripts/deploy-zmp.mjs",
+    "deploy:testing": "node ./scripts/deploy-zmp.mjs --testing",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src --ext .ts,.tsx",
     "test": "vitest run"
