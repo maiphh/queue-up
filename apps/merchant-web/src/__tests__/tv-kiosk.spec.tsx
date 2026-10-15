@@ -1,89 +1,52 @@
 /**
- * Smart TV 16:9 Caller — Phase 4.2 RED specs + branch-id route.
+ * TV display — round 4 Style D states (live · calling · paused · empty · loading · offline · error · clinic).
  */
-
-import { act, render, screen, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import type { WsServerEvent } from '@luotdi/shared';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  vi,
-  type Mock,
-} from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import { useQueueSocket } from '../hooks/useQueueSocket';
-import { TvKioskPage } from '../modules/tv-kiosk';
+import { TvKioskPage, buildViSummonSpeech } from '../modules/tv-kiosk';
+import { backoffMs, deriveTvState, sentenceCase, vnClock, type TvSnapshot } from '../modules/tv-kiosk/tvLogic';
 
-/** Middle dot U+00B7 — display format prefix·NNN */
-const MIDDLE_DOT = '\u00B7';
-const DISPLAY_A014 = `A${MIDDLE_DOT}014`;
+const D = '\u00B7';
+const N = (p: string, n: number) => `${p}${D}${String(n).padStart(3, '0')}`;
+const BRANCH_ID = 'branch-pho-d1';
 
-const BRANCH_SLUG = 'pho-24-nguyen-hue';
-const BRANCH_ID = 'branch-1';
-
-const TV_SNAPSHOT = {
+const SNAP: TvSnapshot = {
   branchId: BRANCH_ID,
-  branchSlug: BRANCH_SLUG,
-  branchName: 'Pho 24 — Nguyen Hue',
-  walkInQrUrl: `https://luotdi.app/b/qr-${BRANCH_SLUG}`,
+  branchSlug: 'pho-24-nh',
+  branchName: 'Phở 24 Nguyễn Huệ',
+  merchantName: 'Phở 24',
+  address: '56 Nguyễn Huệ',
+  district: 'Quận 1',
+  routingMode: 'PARTY_SIZE',
+  industryType: 'RESTAURANT',
+  isPaused: false,
+  servedToday: 86,
+  walkInQrUrl: 'https://zalo.me/app/link?qr=qr-pho-nguyen-hue',
+  nowServing: { displayNumber: N('A', 12), bucketPrefix: 'A', bucketLabelVi: 'Bàn A', minPax: 1, maxPax: 2, calledAt: Date.now() },
+  recent: [{ displayNumber: N('A', 11), calledAt: 1 }, { displayNumber: N('B', 4), calledAt: 1 }, { displayNumber: N('C', 1), calledAt: 1 }],
   buckets: [
-    {
-      id: 'bucket-a',
-      prefix: 'A',
-      labelVi: 'BÀN A',
-      partiesWaiting: 3,
-      estimatedWaitMins: 12,
-    },
-    {
-      id: 'bucket-b',
-      prefix: 'B',
-      labelVi: 'BÀN B',
-      partiesWaiting: 2,
-      estimatedWaitMins: 20,
-    },
-    {
-      id: 'bucket-c',
-      prefix: 'C',
-      labelVi: 'BÀN C',
-      partiesWaiting: 1,
-      estimatedWaitMins: 35,
-    },
+    { id: 'a', prefix: 'A', labelVi: '01-02 KHÁCH', minPax: 1, maxPax: 2, partiesWaiting: 5, estimatedWaitMins: 12, next: [N('A', 13), N('A', 14), N('A', 15)] },
+    { id: 'b', prefix: 'B', labelVi: '03-04 KHÁCH', minPax: 3, maxPax: 4, partiesWaiting: 2, estimatedWaitMins: 18, next: [N('B', 5), N('B', 6)] },
+    { id: 'c', prefix: 'C', labelVi: '05-12 KHÁCH', minPax: 5, maxPax: 12, partiesWaiting: 1, estimatedWaitMins: 25, next: [N('C', 2)] },
   ],
 };
 
-const queueSocket = vi.hoisted(() => {
-  const listeners = new Set<(event: WsServerEvent) => void>();
-  return {
-    listeners,
-    emit(event: WsServerEvent) {
-      for (const listener of listeners) listener(event);
-    },
-    reset() {
-      listeners.clear();
-    },
-  };
+const sock = vi.hoisted(() => {
+  const listeners = new Set<(e: WsServerEvent) => void>();
+  return { listeners, emit: (e: WsServerEvent) => listeners.forEach((l) => l(e)) };
 });
 
 vi.mock('../hooks/useQueueSocket', () => ({
-  useQueueSocket: vi.fn(
-    (opts: { onEvent?: (event: WsServerEvent) => void } = {}) => {
-      if (opts.onEvent) {
-        queueSocket.listeners.add(opts.onEvent);
-      }
-      return { connected: true };
-    },
-  ),
+  useQueueSocket: vi.fn((opts: { onEvent?: (e: WsServerEvent) => void } = {}) => {
+    if (opts.onEvent) sock.listeners.add(opts.onEvent);
+    return { connected: true };
+  }),
 }));
 
-type MockUtterance = {
-  text: string;
-  lang: string;
-};
-
-function renderTvKiosk(path = `/tv/${BRANCH_SLUG}`) {
+function renderTv(path = `/tv/branch/${BRANCH_ID}`) {
   return render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
@@ -94,239 +57,188 @@ function renderTvKiosk(path = `/tv/${BRANCH_SLUG}`) {
   );
 }
 
-function mockFetchSnapshot(
-  overrides: Partial<typeof TV_SNAPSHOT> = {},
-) {
-  const payload = { ...TV_SNAPSHOT, ...overrides };
-  return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = String(input);
-    const method = (init?.method ?? 'GET').toUpperCase();
-
-    if (
-      method === 'GET' &&
-      (url.includes(`/api/branches/slug/${BRANCH_SLUG}`) ||
-        url.includes(`/api/tv/${BRANCH_SLUG}`) ||
-        url.includes(`/api/branches/${BRANCH_SLUG}/tv`) ||
-        url.includes(`/api/branches/${BRANCH_SLUG}/snapshot`))
-    ) {
-      return Response.json(payload);
-    }
-
-    return Response.json({ error: 'not mocked', url, method }, { status: 404 });
-  });
+function serve(payload: Partial<TvSnapshot> | (() => Response | Promise<Response>)) {
+  const f = vi.fn(async () => (typeof payload === 'function' ? payload() : Response.json({ ...SNAP, ...payload })));
+  vi.stubGlobal('fetch', f);
+  return f;
 }
 
-describe('Smart TV — YOUR_TURN_CALLED summoning panel', () => {
-  let fetchMock: Mock;
-  let speakMock: Mock;
-  let lastUtterance: MockUtterance | null;
-
-  beforeEach(() => {
-    queueSocket.reset();
-    lastUtterance = null;
-    speakMock = vi.fn((utterance: MockUtterance) => {
-      lastUtterance = utterance;
-    });
-
-    class SpeechSynthesisUtteranceMock {
-      text: string;
-      lang = '';
-      constructor(text: string) {
-        this.text = text;
-      }
-    }
-
-    vi.stubGlobal('SpeechSynthesisUtterance', SpeechSynthesisUtteranceMock);
-    vi.stubGlobal('speechSynthesis', {
-      speak: speakMock,
-      cancel: vi.fn(),
-      getVoices: () => [],
-      pending: false,
-      speaking: false,
-      paused: false,
-    });
-
-    fetchMock = mockFetchSnapshot();
-    vi.stubGlobal('fetch', fetchMock);
+const call = (num: string) =>
+  act(async () => {
+    sock.emit({ type: 'YOUR_TURN_CALLED', branchId: BRANCH_ID, ticketId: `t-${num}`, displayNumber: num, at: Date.now() });
   });
 
-  afterEach(() => {
-    vi.unstubAllGlobals();
-    vi.clearAllMocks();
+let speak: Mock;
+beforeEach(() => {
+  sock.listeners.clear();
+  speak = vi.fn();
+  vi.stubGlobal('speechSynthesis', { speak, cancel: vi.fn(), getVoices: () => [] });
+  vi.stubGlobal('SpeechSynthesisUtterance', class { lang = ''; constructor(public text: string) {} });
+});
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+  vi.clearAllMocks();
+});
+
+describe('TV · live', () => {
+  it('shows the current number after a reload, next 3 per bàn and recent calls — numbers only', async () => {
+    serve({});
+    renderTv();
+    const hero = await screen.findByTestId('tv-summoning-panel');
+    expect(within(hero).getByTestId('tv-now-number').textContent).toBe(N('A', 12));
+    expect(within(hero).getByText('Mời vào bàn A')).toBeInTheDocument();
+    expect(within(hero).getByText(/Nhóm 1–2 khách/)).toBeInTheDocument();
+    expect(within(screen.getByTestId('tv-recent')).getAllByText(/·/).map((e) => e.textContent)).toEqual([N('A', 11), N('B', 4), N('C', 1)]);
+    const a = screen.getByTestId('tv-bucket-A');
+    expect(within(a).getByText('Bàn A · 1–2 khách')).toBeInTheDocument();
+    expect(within(a).getByText(N('A', 13))).toBeInTheDocument();
+    expect(within(a).getByText(/chờ 12 phút/)).toBeInTheDocument();
+    expect(screen.getByTestId('tv-status')).toHaveTextContent('Đang mở');
+    expect(screen.getByTestId('be-ve-idle')).toBeInTheDocument();
+    expect(screen.getByTestId('walk-in-qr').querySelector('[data-qr-url]')!.getAttribute('data-qr-url')).toBe(SNAP.walkInQrUrl);
   });
 
-  it('flashes ticket on left 50% Đang mời when YOUR_TURN_CALLED arrives', async () => {
-    renderTvKiosk();
-
-    const layout = await screen.findByTestId('tv-kiosk-layout');
-    expect(layout).toBeInTheDocument();
-
-    const left = screen.getByTestId('tv-summoning-panel');
-    expect(left).toBeInTheDocument();
-
-    await act(async () => {
-      queueSocket.emit({
-        type: 'YOUR_TURN_CALLED',
-        branchId: BRANCH_ID,
-        ticketId: 'ticket-a014',
-        displayNumber: DISPLAY_A014,
-        at: Date.now(),
-      });
-    });
-
-    expect(useQueueSocket).toHaveBeenCalled();
-    expect(within(left).getByText(/Đang mời/i)).toBeInTheDocument();
-    expect(within(left).getByText(DISPLAY_A014)).toBeInTheDocument();
-    // Flash / highlight signal for the summoned ticket
-    expect(left.className).toMatch(/signal-orange|flash|summoning/i);
+  it('per-branch slug route hits /api/branches/slug/:slug', async () => {
+    const f = serve({});
+    renderTv('/tv/pho-24-nh');
+    await screen.findByTestId('tv-summoning-panel');
+    expect(String(f.mock.calls[0]![0 as never])).toContain('/api/branches/slug/pho-24-nh');
   });
 
-  it('invokes speechSynthesis with lang vi-VN for the summoned ticket', async () => {
-    renderTvKiosk();
-    await screen.findByTestId('tv-kiosk-layout');
-
-    await act(async () => {
-      queueSocket.emit({
-        type: 'YOUR_TURN_CALLED',
-        branchId: BRANCH_ID,
-        ticketId: 'ticket-a014',
-        displayNumber: DISPLAY_A014,
-        at: Date.now(),
-      });
-    });
-
-    expect(speakMock).toHaveBeenCalled();
-    expect(lastUtterance).not.toBeNull();
-    expect(lastUtterance!.lang).toBe('vi-VN');
-    expect(lastUtterance!.text).toMatch(/Xin mời quý khách số A/i);
-    expect(lastUtterance!.text).toMatch(/không một bốn/i);
-    expect(lastUtterance!.text).toMatch(/vào bàn/i);
+  it('branch-id route never uses the merchant slug lookup', async () => {
+    const f = serve({});
+    renderTv('/tv/branch/branch-pho-d3');
+    await screen.findByTestId('tv-summoning-panel');
+    const urls = f.mock.calls.map((c) => String((c as unknown[])[0]));
+    expect(urls.every((u) => u.includes('/api/branches/branch-pho-d3/tv'))).toBe(true);
   });
 });
 
-describe('Smart TV — right panel bucket summary + walk-in QR', () => {
-  let fetchMock: Mock;
+describe('TV · calling', () => {
+  it('turns green with "Xin mời số", chimes then speaks vi-VN, and queues overlapping calls', async () => {
+    serve({});
+    renderTv();
+    await screen.findByTestId('tv-summoning-panel');
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    await call(N('A', 14));
+    const hero = screen.getByTestId('tv-summoning-panel');
+    expect(hero.dataset.calling).toBe('true');
+    expect(within(hero).getByText('Xin mời số')).toBeInTheDocument();
+    expect(within(hero).getByTestId('tv-now-number').textContent).toBe(N('A', 14));
+    expect(screen.getByTestId('be-ve-celebrate')).toBeInTheDocument();
+    await waitFor(() => expect(speak).toHaveBeenCalledTimes(1));
+    const u = speak.mock.calls[0]![0] as { lang: string; text: string };
+    expect(u.lang).toBe('vi-VN');
+    expect(u.text).toMatch(/Xin mời quý khách số A, không một bốn, vào bàn/);
 
-  beforeEach(() => {
-    queueSocket.reset();
-    fetchMock = mockFetchSnapshot();
-    vi.stubGlobal('fetch', fetchMock);
-    vi.stubGlobal('speechSynthesis', {
-      speak: vi.fn(),
-      cancel: vi.fn(),
-      getVoices: () => [],
+    await call(N('B', 5)); // inside the 6s window → queued
+    expect(within(hero).getByTestId('tv-now-number').textContent).toBe(N('A', 14));
+    await act(async () => { await vi.advanceTimersByTimeAsync(6000); });
+    expect(screen.getByTestId('tv-now-number').textContent).toBe(N('B', 5));
+    await waitFor(() => expect(speak).toHaveBeenCalledTimes(2));
+    await act(async () => { await vi.advanceTimersByTimeAsync(6000); });
+    expect(screen.getByTestId('tv-summoning-panel').dataset.calling).toBeUndefined();
+  });
+
+  it('QUEUE_UPDATED{status:CALLED} (what the room actually sends TVs) triggers the call', async () => {
+    serve({});
+    renderTv();
+    await screen.findByTestId('tv-summoning-panel');
+    await act(async () => {
+      sock.emit({ type: 'QUEUE_UPDATED', branchId: BRANCH_ID, ticketId: 't', displayNumber: N('C', 2), status: 'CALLED', at: Date.now() });
     });
-    vi.stubGlobal(
-      'SpeechSynthesisUtterance',
-      class {
-        text: string;
-        lang = '';
-        constructor(text: string) {
-          this.text = text;
-        }
-      },
-    );
+    expect(screen.getByTestId('tv-summoning-panel').dataset.calling).toBe('true');
+    expect(screen.getByTestId('tv-now-number').textContent).toBe(N('C', 2));
   });
 
-  afterEach(() => {
-    vi.unstubAllGlobals();
-    vi.clearAllMocks();
-  });
-
-  it('renders live bucket summary BÀN A/B/C without emoji on the right 50%', async () => {
-    renderTvKiosk();
-
-    const right = await screen.findByTestId('tv-sidebar-panel');
-    const buckets = within(right).getByTestId('tv-bucket-summary');
-
-    expect(within(buckets).getByText(/BÀN\s*A/i)).toBeInTheDocument();
-    expect(within(buckets).getByText(/BÀN\s*B/i)).toBeInTheDocument();
-    expect(within(buckets).getByText(/BÀN\s*C/i)).toBeInTheDocument();
-
-    // Live waiting counts from snapshot
-    expect(within(buckets).getByText('3')).toBeInTheDocument();
-    expect(within(buckets).getByText('2')).toBeInTheDocument();
-    expect(within(buckets).getByText('1')).toBeInTheDocument();
-
-    // No emoji in bucket summary copy
-    expect(buckets.textContent ?? '').not.toMatch(
-      /[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/u,
-    );
-  });
-
-  it('renders a high-contrast static QR for walk-ins on the right 50%', async () => {
-    renderTvKiosk();
-
-    const right = await screen.findByTestId('tv-sidebar-panel');
-    const qr = within(right).getByTestId('walk-in-qr');
-    expect(qr).toBeInTheDocument();
-
-    const target = qr.matches('[data-qr-url]')
-      ? qr
-      : qr.querySelector('[data-qr-url], img, svg, canvas');
-    expect(target).not.toBeNull();
-    expect(target!.getAttribute('data-qr-url')).toBe(TV_SNAPSHOT.walkInQrUrl);
+  it('builds the vi-VN summon phrase', () => {
+    expect(buildViSummonSpeech(N('A', 14))).toBe('Xin mời quý khách số A, không một bốn, vào bàn');
   });
 });
 
-describe('Smart TV — /tv/branch/:branchId endpoint', () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-    vi.clearAllMocks();
+describe('TV · paused / empty / clinic', () => {
+  it('paused: yellow hero with sleeping Bé Vé, list retitled GIỮ LƯỢT, QR greyed', async () => {
+    serve({ isPaused: true });
+    renderTv();
+    expect(await screen.findByText('Quán nghỉ tay một chút nhé!')).toBeInTheDocument();
+    expect(screen.getByTestId('be-ve-sleep')).toBeInTheDocument();
+    expect(screen.getByText('GIỮ LƯỢT')).toBeInTheDocument();
+    expect(screen.getByText('Tạm dừng lấy số mới')).toBeInTheDocument();
+    expect(screen.getByTestId('walk-in-qr').className).toContain('tv-qrc-off');
+    expect(screen.getByTestId('tv-status')).toHaveTextContent('Tạm dừng');
   });
 
-  it('loads Phở 24 Quận 3 from branch-id TV URL, not slug LIMIT 1', async () => {
-    const branchPhoD3 = 'branch-pho-d3';
-    const payload = {
-      branchId: branchPhoD3,
-      branchSlug: 'pho-24',
-      branchName: 'Phở 24 Quận 3',
-      walkInQrUrl: 'https://luotdi.app/b/qr-pho-q3',
-      buckets: TV_SNAPSHOT.buckets,
-    };
+  it('empty: "Chưa có ai đang chờ", no-wait buckets and served-today count', async () => {
+    serve({ nowServing: null, recent: [], buckets: SNAP.buckets.map((b) => ({ ...b, partiesWaiting: 0, next: [] })) });
+    renderTv();
+    expect(await screen.findByText('Chưa có ai đang chờ')).toBeInTheDocument();
+    expect(screen.getAllByText('Không phải chờ · mời vào ngay')).toHaveLength(3);
+    expect(screen.getByText('86')).toBeInTheDocument();
+  });
 
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url.includes(`/api/branches/${branchPhoD3}/tv`)) {
-        return Response.json(payload);
-      }
-      if (url.includes('/api/branches/slug/')) {
-        return Response.json({
-          ...TV_SNAPSHOT,
-          branchName: 'Phở 24 Nguyễn Huệ',
-        });
-      }
-      return Response.json({ error: 'not mocked', url }, { status: 404 });
+  it('clinic: patient wording and service names instead of Bàn', async () => {
+    serve({
+      routingMode: 'SERVICE_TYPE',
+      industryType: 'CLINIC',
+      nowServing: { displayNumber: N('G', 4), bucketPrefix: 'G', bucketLabelVi: 'KHÁM TỔNG QUÁT', minPax: 1, maxPax: 1, calledAt: 1 },
+      buckets: [{ id: 'g', prefix: 'G', labelVi: 'KHÁM TỔNG QUÁT', minPax: 1, maxPax: 1, partiesWaiting: 6, estimatedWaitMins: 20, next: [N('G', 5)] }],
     });
-    vi.stubGlobal('fetch', fetchMock);
-    vi.stubGlobal('speechSynthesis', {
-      speak: vi.fn(),
-      cancel: vi.fn(),
-      getVoices: () => [],
-    });
-    vi.stubGlobal(
-      'SpeechSynthesisUtterance',
-      class {
-        text: string;
-        lang = '';
-        constructor(text: string) {
-          this.text = text;
-        }
-      },
-    );
+    renderTv();
+    expect(await screen.findByText('Mời bệnh nhân vào Quầy khám')).toBeInTheDocument();
+    expect(screen.getAllByText('Khám tổng quát').length).toBeGreaterThan(0);
+    expect(screen.getByTestId('tv-bucket-G')).toHaveTextContent('6 bệnh nhân');
+    expect(screen.queryByText(/Bàn G/)).toBeNull();
+  });
+});
 
-    renderTvKiosk(`/tv/branch/${branchPhoD3}`);
+describe('TV · loading / offline / error', () => {
+  it('loading shows the connecting message', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => undefined)));
+    renderTv();
+    expect(await screen.findByText('Đang kết nối màn hình…')).toBeInTheDocument();
+  });
 
-    expect(await screen.findByText('Phở 24 Quận 3')).toBeInTheDocument();
-    expect(screen.queryByText(/Nguyễn Huệ/i)).not.toBeInTheDocument();
+  it('offline keeps the last data, turns the chip hot and hides the hero mascot', async () => {
+    let fail = false;
+    serve(() => (fail ? Promise.reject(new Error('net')) : Response.json(SNAP)));
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    renderTv();
+    await screen.findByTestId('tv-summoning-panel');
+    fail = true;
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_100); });
+    expect(screen.getByTestId('tv-status')).toHaveTextContent('Mất kết nối · đang thử lại');
+    expect(screen.getByTestId('tv-offline-bar')).toHaveTextContent(/Đang kết nối lại · số hiển thị lúc \d\d:\d\d/);
+    expect(screen.getByTestId('tv-now-number').textContent).toBe(N('A', 12));
+    expect(screen.queryByTestId('be-ve-idle')).toBeNull();
+    fail = false;
+    await act(async () => { await vi.advanceTimersByTimeAsync(2100); });
+    expect(screen.getByTestId('tv-status')).toHaveTextContent('Đang mở');
+  });
 
-    expect(fetchMock).toHaveBeenCalled();
-    const calledUrls = fetchMock.mock.calls.map((c) => String(c[0]));
-    expect(
-      calledUrls.some((u) => u.includes(`/api/branches/${branchPhoD3}/tv`)),
-    ).toBe(true);
-    expect(calledUrls.some((u) => u.includes('/api/branches/slug/'))).toBe(
-      false,
-    );
+  it('unknown branch shows the not-found screen with the URL and retries after 30s', async () => {
+    const f = serve(() => Response.json({ code: 'BRANCH_NOT_FOUND' }, { status: 404 }));
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    renderTv('/tv/branch/branch-nope');
+    expect(await screen.findByText('Không tìm thấy chi nhánh cho màn hình này')).toBeInTheDocument();
+    expect(screen.getByText('/tv/branch/branch-nope')).toBeInTheDocument();
+    const before = f.mock.calls.length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_100); });
+    expect(f.mock.calls.length).toBe(before + 1);
+  });
+});
+
+describe('TV · pure logic', () => {
+  it('derives states and helpers', () => {
+    expect(deriveTvState({ snapshot: null, notFound: false, failing: false, calling: false })).toBe('loading');
+    expect(deriveTvState({ snapshot: SNAP, notFound: true, failing: false, calling: false })).toBe('error');
+    expect(deriveTvState({ snapshot: SNAP, notFound: false, failing: true, calling: true })).toBe('offline');
+    expect(deriveTvState({ snapshot: SNAP, notFound: false, failing: false, calling: true })).toBe('calling');
+    expect(deriveTvState({ snapshot: { ...SNAP, isPaused: true }, notFound: false, failing: false, calling: false })).toBe('paused');
+    expect(backoffMs(0)).toBe(2000);
+    expect(backoffMs(10)).toBe(30_000);
+    expect(sentenceCase('KHÁM TỔNG QUÁT')).toBe('Khám tổng quát');
+    expect(vnClock(Date.UTC(2026, 9, 15, 5, 5))).toEqual({ time: '12:05', date: 'Thứ Năm, 15/10' });
+    expect(useQueueSocket).toBeDefined();
   });
 });

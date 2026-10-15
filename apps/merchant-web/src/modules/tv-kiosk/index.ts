@@ -1,1 +1,1 @@
-export { TvKioskPage } from './TvKioskPage';
+export { TvKioskPage, buildViSummonSpeech } from './TvKioskPage';

@@ -31,8 +31,11 @@ CREATE TABLE branches (
   allow_remote_queue INTEGER NOT NULL DEFAULT 1,
   is_paused INTEGER NOT NULL DEFAULT 0,
   grace_period_mins INTEGER NOT NULL DEFAULT 10,
-  created_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL,
+  slug TEXT -- per-branch TV slug (migrations/0002_branch_slug.sql)
 );
+
+CREATE UNIQUE INDEX idx_branches_slug ON branches(slug);
 
 CREATE TABLE queue_buckets (
   id TEXT PRIMARY KEY,

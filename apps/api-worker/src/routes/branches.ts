@@ -29,6 +29,7 @@ type BranchJoinRow = {
   industry_type: string;
   plan_tier: string;
   wallet_balance_vnd: number;
+  slug?: string | null;
 };
 
 type BucketRow = {
@@ -69,16 +70,112 @@ function marketplaceCategory(
   return industryType === 'SALON' ? 'SALON' : 'RESTAURANT';
 }
 
+const BRANCH_COLS = `b.id, b.name, b.address, b.district, b.city, b.qr_code_token,
+              b.routing_mode, b.is_paused, b.grace_period_mins, b.slug,
+              m.id AS merchant_id, m.name AS merchant_name, m.slug AS merchant_slug,
+              m.industry_type, m.plan_tier, m.wallet_balance_vnd`;
+
+/** Calendar date YYYY-MM-DD in Asia/Ho_Chi_Minh. */
+function vnDate(nowMs = Date.now()): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Ho_Chi_Minh', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date(nowMs));
+}
+
+function walkInQrUrl(qrToken: string): string {
+  return `https://zalo.me/app/link?qr=${encodeURIComponent(qrToken)}`;
+}
+
+/**
+ * TV payload. Numbers only (no guest names/phones). `nowServing` = latest CALLED
+ * ticket so a freshly loaded TV is not blank; `recent` = the 3 calls before it today;
+ * `buckets[].next` = next 3 WAITING numbers in call order.
+ */
+async function buildTvPayload(db: D1Database, branch: BranchJoinRow) {
+  const buckets = await loadBuckets(db, branch.id);
+  const bucketPayload = [];
+  for (const bucket of buckets) {
+    const live = await bucketLiveMetrics(db, branch.id, bucket);
+    const next = await db
+      .prepare(
+        `SELECT display_number FROM tickets
+         WHERE branch_id = ?1 AND bucket_id = ?2 AND status = 'WAITING'
+         ORDER BY priority_boost DESC, created_at ASC LIMIT 3`,
+      )
+      .bind(branch.id, bucket.id)
+      .all<{ display_number: string }>();
+    bucketPayload.push({
+      id: bucket.id,
+      prefix: bucket.prefix,
+      labelVi: bucket.label_vi,
+      minPax: bucket.min_pax,
+      maxPax: bucket.max_pax,
+      partiesWaiting: live.partiesWaiting,
+      estimatedWaitMins: live.partiesWaiting > 0 ? live.estimatedWaitMins : 0,
+      next: (next.results ?? []).map((r) => r.display_number),
+    });
+  }
+
+  const today = vnDate();
+  const called = await db
+    .prepare(
+      `SELECT t.display_number, t.status, t.called_at, q.prefix, q.label_vi, q.min_pax, q.max_pax
+       FROM tickets t JOIN queue_buckets q ON q.id = t.bucket_id
+       WHERE t.branch_id = ?1 AND t.ticket_date = ?2 AND t.called_at IS NOT NULL
+       ORDER BY t.called_at DESC LIMIT 4`,
+    )
+    .bind(branch.id, today)
+    .all<{
+      display_number: string; status: string; called_at: number;
+      prefix: string; label_vi: string; min_pax: number; max_pax: number;
+    }>();
+  const calls = called.results ?? [];
+  const head = calls[0] && calls[0].status === 'CALLED' ? calls[0] : null;
+  const served = await db
+    .prepare(
+      `SELECT COUNT(*) AS c FROM tickets WHERE branch_id = ?1 AND ticket_date = ?2 AND status = 'SEATED'`,
+    )
+    .bind(branch.id, today)
+    .first<{ c: number }>();
+
+  return {
+    branchId: branch.id,
+    branchName: branch.name,
+    branchSlug: branch.slug ?? branch.merchant_slug,
+    merchantSlug: branch.merchant_slug,
+    merchantName: branch.merchant_name,
+    address: branch.address,
+    district: branch.district,
+    routingMode: branch.routing_mode,
+    industryType: branch.industry_type,
+    isPaused: branch.is_paused === 1,
+    servedToday: served?.c ?? 0,
+    walkInQrUrl: walkInQrUrl(branch.qr_code_token),
+    nowServing: head
+      ? {
+          displayNumber: head.display_number,
+          bucketPrefix: head.prefix,
+          bucketLabelVi: head.label_vi,
+          minPax: head.min_pax,
+          maxPax: head.max_pax,
+          calledAt: head.called_at,
+        }
+      : null,
+    recent: calls
+      .slice(head ? 1 : 0)
+      .slice(0, 3)
+      .map((r) => ({ displayNumber: r.display_number, calledAt: r.called_at })),
+    buckets: bucketPayload,
+  };
+}
+
 async function loadBranchById(
   db: D1Database,
   branchId: string,
 ): Promise<BranchJoinRow | null> {
   return db
     .prepare(
-      `SELECT b.id, b.name, b.address, b.district, b.city, b.qr_code_token,
-              b.routing_mode, b.is_paused, b.grace_period_mins,
-              m.id AS merchant_id, m.name AS merchant_name, m.slug AS merchant_slug,
-              m.industry_type, m.plan_tier, m.wallet_balance_vnd
+      `SELECT ${BRANCH_COLS}
        FROM branches b
        JOIN merchants m ON m.id = b.merchant_id
        WHERE b.id = ?1`,
@@ -229,77 +326,40 @@ branches.get('/by-qr/:qrToken', async (c) => {
   });
 });
 
-/** GET /api/branches/slug/:slug — TV kiosk (merchant slug → primary branch) */
+/**
+ * GET /api/branches/slug/:slug — TV kiosk fallback. Resolves the per-branch slug
+ * (`pho-24-nh`) first; a merchant slug (`pho-24`) still works for old links and
+ * picks the oldest branch.
+ */
 branches.get('/slug/:slug', async (c) => {
   const slug = c.req.param('slug');
-  const branch = await c.env.DB.prepare(
-    `SELECT b.id, b.name, b.address, b.district, b.city, b.qr_code_token,
-            b.routing_mode, b.is_paused, b.grace_period_mins,
-            m.id AS merchant_id, m.name AS merchant_name, m.slug AS merchant_slug,
-            m.industry_type, m.plan_tier, m.wallet_balance_vnd
-     FROM branches b
-     JOIN merchants m ON m.id = b.merchant_id
-     WHERE m.slug = ?1
-     ORDER BY b.created_at ASC
-     LIMIT 1`,
-  )
-    .bind(slug)
-    .first<BranchJoinRow>();
+  const branch =
+    (await c.env.DB.prepare(
+      `SELECT ${BRANCH_COLS} FROM branches b JOIN merchants m ON m.id = b.merchant_id
+       WHERE b.slug = ?1`,
+    )
+      .bind(slug)
+      .first<BranchJoinRow>()) ??
+    (await c.env.DB.prepare(
+      `SELECT ${BRANCH_COLS} FROM branches b JOIN merchants m ON m.id = b.merchant_id
+       WHERE m.slug = ?1 ORDER BY b.created_at ASC LIMIT 1`,
+    )
+      .bind(slug)
+      .first<BranchJoinRow>());
 
   if (!branch) {
     return c.json({ error: 'Branch not found', code: 'BRANCH_NOT_FOUND' }, 404);
   }
-
-  const buckets = await loadBuckets(c.env.DB, branch.id);
-  const bucketPayload = [];
-  for (const bucket of buckets) {
-    const live = await bucketLiveMetrics(c.env.DB, branch.id, bucket);
-    bucketPayload.push({
-      id: bucket.id,
-      prefix: bucket.prefix,
-      labelVi: bucket.label_vi,
-      partiesWaiting: live.partiesWaiting,
-      estimatedWaitMins: live.estimatedWaitMins,
-    });
-  }
-
-  return c.json({
-    branchId: branch.id,
-    branchSlug: branch.merchant_slug,
-    branchName: branch.name,
-    walkInQrUrl: `https://zalo.me/app/link?qr=${encodeURIComponent(branch.qr_code_token)}`,
-    buckets: bucketPayload,
-  });
+  return c.json(await buildTvPayload(c.env.DB, branch));
 });
 
-/** GET /api/branches/:branchId/tv — TV for one branch (no LIMIT 1 by merchant) */
+/** GET /api/branches/:branchId/tv — TV for one branch */
 branches.get('/:branchId/tv', async (c) => {
-  const branchId = c.req.param('branchId');
-  const branch = await loadBranchById(c.env.DB, branchId);
+  const branch = await loadBranchById(c.env.DB, c.req.param('branchId'));
   if (!branch) {
     return c.json({ error: 'Branch not found', code: 'BRANCH_NOT_FOUND' }, 404);
   }
-
-  const buckets = await loadBuckets(c.env.DB, branch.id);
-  const bucketPayload = [];
-  for (const bucket of buckets) {
-    const live = await bucketLiveMetrics(c.env.DB, branch.id, bucket);
-    bucketPayload.push({
-      id: bucket.id,
-      prefix: bucket.prefix,
-      labelVi: bucket.label_vi,
-      partiesWaiting: live.partiesWaiting,
-      estimatedWaitMins: live.estimatedWaitMins,
-    });
-  }
-
-  return c.json({
-    branchId: branch.id,
-    branchName: branch.name,
-    branchSlug: branch.merchant_slug,
-    walkInQrUrl: `https://zalo.me/app/link?qr=${encodeURIComponent(branch.qr_code_token)}`,
-    buckets: bucketPayload,
-  });
+  return c.json(await buildTvPayload(c.env.DB, branch));
 });
 
 /** GET /api/branches/:branchId/snapshot — Host POS */
@@ -349,9 +409,7 @@ branches.get('/:branchId/snapshot', async (c) => {
 
   // Call Console extras: bucket tabs + stats strip.
   const bucketRows = await loadBuckets(c.env.DB, branch.id);
-  const today = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Ho_Chi_Minh', year: 'numeric', month: '2-digit', day: '2-digit',
-  }).format(new Date());
+  const today = vnDate();
   const dayStats = await c.env.DB.prepare(
     `SELECT
        SUM(CASE WHEN status = 'SEATED' THEN 1 ELSE 0 END) AS served,

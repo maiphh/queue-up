@@ -89,7 +89,7 @@ The current mock set includes merchants (PRO restaurant, FREE cafe, PRO clinic),
 
 Vars: `ENVIRONMENT` (`wrangler.toml` ships `production`, so `POST /api/auth/dev` returns 404 when deployed; local `.dev.vars` sets `dev`), `CORS_EXTRA_ORIGINS` (comma list, e.g. the `zmp start` preview URL). CORS always allows `https://h5.zdn.vn`.
 
-D1 migration: `wrangler d1 migrations apply luotdi-db --remote` (adds `guest_users`).
+D1 migrations: `wrangler d1 migrations apply luotdi-db --remote` — `0001` guest_users, `0002` per-branch `branches.slug` (TV `/tv/:branchSlug`).
 
 Auth flow: `getAccessToken()` → `POST /api/auth/zalo { accessToken }` → `{ token }` → `Authorization: Bearer <token>` on `POST /api/tickets`. The ticket's `zalo_user_id` comes only from the JWT.
 

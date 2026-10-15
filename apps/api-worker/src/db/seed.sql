@@ -542,3 +542,11 @@ INSERT INTO wallet_ledger (
     'zns_approaching_ticket-pho-a006',
     (unixepoch('now') - 1500) * 1000
   );
+
+-- ---------------------------------------------------------------------------
+-- Round 4: per-branch TV slugs (/tv/:branchSlug)
+-- ---------------------------------------------------------------------------
+UPDATE branches SET slug = 'pho-24-nh' WHERE id = 'branch-pho-d1';
+UPDATE branches SET slug = 'pho-24-q3' WHERE id = 'branch-pho-d3';
+UPDATE branches SET slug = 'cafe-trung-q3' WHERE id = 'branch-cafe-d3';
+UPDATE branches SET slug = 'an-tam-tan-binh' WHERE id = 'branch-clinic-tb';
