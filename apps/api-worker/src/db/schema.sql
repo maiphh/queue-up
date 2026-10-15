@@ -34,6 +34,8 @@ CREATE TABLE branches (
   created_at INTEGER NOT NULL,
   slug TEXT, -- per-branch TV slug (migrations/0002_branch_slug.sql)
   paused_at INTEGER, -- migrations/0004_branch_paused_at.sql
+  lat REAL, -- migrations/0005_branch_location.sql
+  lng REAL,
   -- migrations/0003_branch_settings.sql (Manager · Cài đặt quầy)
   zns_almost_threshold INTEGER NOT NULL DEFAULT 2,
   zns_call_enabled INTEGER NOT NULL DEFAULT 1,

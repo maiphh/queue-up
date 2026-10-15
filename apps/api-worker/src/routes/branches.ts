@@ -2,6 +2,7 @@ import { calculateEstimatedWait } from '@luotdi/shared';
 import { Hono } from 'hono';
 import type { Env } from '../index';
 import { assertBranchAccess, pauseReason, readActor } from '../services';
+import { readGuestBearer } from '../services/jwt';
 
 /**
  * Branch-scoped routes.
@@ -252,44 +253,90 @@ async function bucketLiveMetrics(db: D1Database, branchId: string, bucket: Bucke
   return { partiesWaiting, estimatedWaitMins };
 }
 
-/** GET /api/branches — marketplace list */
+/** Great-circle distance in metres. */
+export function distanceM(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
+  const R = 6_371_000;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return Math.round(2 * R * Math.asin(Math.sqrt(h)));
+}
+
+/**
+ * GET /api/branches — marketplace list.
+ * `?lat=&lng=` (only after the guest grants Zalo location) adds `distanceM` and sorts nearest first.
+ * A guest Bearer adds `activeTicket` (the pinned card).
+ */
 branches.get('/', async (c) => {
+  const lat = Number.parseFloat(c.req.query('lat') ?? '');
+  const lng = Number.parseFloat(c.req.query('lng') ?? '');
+  const here = Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180 ? { lat, lng } : null;
+
   const result = await c.env.DB.prepare(
-    `SELECT b.id, b.name, b.district, b.qr_code_token,
+    `SELECT b.id, b.name, b.district, b.address, b.qr_code_token, b.lat, b.lng,
+            b.is_paused, b.open_time, b.close_time, b.auto_pause_wait_mins, b.allow_remote_queue,
             m.slug AS merchant_slug, m.name AS merchant_name, m.industry_type
      FROM branches b
      JOIN merchants m ON m.id = b.merchant_id
      WHERE m.status = 'ACTIVE'
      ORDER BY b.name ASC`,
   ).all<{
-    id: string;
-    name: string;
-    district: string;
-    qr_code_token: string;
-    merchant_slug: string;
-    merchant_name: string;
-    industry_type: string;
+    id: string; name: string; district: string; address: string; qr_code_token: string;
+    lat: number | null; lng: number | null; is_paused: number; open_time: string | null; close_time: string | null;
+    auto_pause_wait_mins: number | null; allow_remote_queue: number;
+    merchant_slug: string; merchant_name: string; industry_type: string;
   }>();
 
-  const rows = result.results ?? [];
+  const now = Date.now();
   const branchesOut = [];
-  for (const row of rows) {
+  for (const row of result.results ?? []) {
+    const buckets = await loadBuckets(c.env.DB, row.id);
+    const waits = [];
+    for (const bk of buckets) waits.push((await bucketLiveMetrics(c.env.DB, row.id, bk)).estimatedWaitMins);
     const waitingCount = await countWaiting(c.env.DB, row.id);
+    const reason = pauseReason(row, now, Math.max(0, ...waits));
     branchesOut.push({
       id: row.id,
       name: row.name,
-      category: marketplaceCategory(
-        row.industry_type,
-        row.merchant_slug,
-        row.merchant_name,
-      ),
+      merchantName: row.merchant_name,
+      category: marketplaceCategory(row.industry_type, row.merchant_slug, row.merchant_name),
       waitingCount,
+      /** Shortest bucket wait ("~14 phút"); null when the branch has no open bucket. */
+      estimatedWaitMins: waits.length ? Math.min(...waits) : null,
       district: row.district,
+      address: row.address,
       qrToken: row.qr_code_token,
+      isPaused: reason !== null,
+      pauseReason: reason,
+      remoteQueue: row.allow_remote_queue === 1,
+      distanceM: here && row.lat != null && row.lng != null ? distanceM(here, { lat: row.lat, lng: row.lng }) : null,
     });
   }
+  if (here) branchesOut.sort((x, y) => (x.distanceM ?? Infinity) - (y.distanceM ?? Infinity));
 
-  return c.json({ branches: branchesOut });
+  let activeTicket = null;
+  const bearer = await readGuestBearer(c.req.header('Authorization'), c.env.JWT_SECRET);
+  if (bearer.kind === 'ok') {
+    const t = await c.env.DB.prepare(
+      `SELECT t.id, t.display_number, t.status, t.bucket_id, t.created_at, t.branch_id, b.name AS branch_name
+       FROM tickets t JOIN branches b ON b.id = t.branch_id
+       WHERE t.zalo_user_id = ?1 AND t.status IN ('WAITING', 'CALLED', 'HELD')
+       ORDER BY t.created_at DESC LIMIT 1`,
+    )
+      .bind(bearer.claims.zid)
+      .first<{ id: string; display_number: string; status: string; bucket_id: string; created_at: number; branch_id: string; branch_name: string }>();
+    if (t) {
+      const ahead = t.status === 'WAITING'
+        ? (await c.env.DB.prepare(
+            `SELECT COUNT(*) AS c FROM tickets WHERE bucket_id = ?1 AND status = 'WAITING' AND (created_at < ?2 OR (created_at = ?2 AND id < ?3))`,
+          ).bind(t.bucket_id, t.created_at, t.id).first<{ c: number }>())?.c ?? 0
+        : 0;
+      activeTicket = { id: t.id, displayNumber: t.display_number, status: t.status, branchId: t.branch_id, branchName: t.branch_name, partiesAhead: ahead };
+    }
+  }
+
+  return c.json({ branches: branchesOut, activeTicket, located: here !== null });
 });
 
 /** GET /api/branches/by-qr/:qrToken — customer check-in */
@@ -318,6 +365,7 @@ branches.get('/by-qr/:qrToken', async (c) => {
       labelVi: bucket.label_vi,
       minPax: bucket.min_pax,
       maxPax: bucket.max_pax,
+      activeCounters: bucket.active_counters,
       partiesWaiting: live.partiesWaiting,
       estimatedWaitMins: live.estimatedWaitMins,
     });

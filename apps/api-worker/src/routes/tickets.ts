@@ -270,18 +270,22 @@ tickets.post('/', async (c) => {
   if (zaloUserId) {
     const active = await db
       .prepare(
-        `SELECT id FROM tickets
+        `SELECT id, display_number FROM tickets
          WHERE branch_id = ?1
            AND zalo_user_id = ?2
            AND status IN ('WAITING', 'CALLED', 'HELD')
          LIMIT 1`,
       )
       .bind(req.branchId, zaloUserId)
-      .first<{ id: string }>();
+      .first<{ id: string; display_number: string }>();
 
     if (active) {
+      // The guest screen pins this ticket with "Xem số của tôi".
       return c.json(
-        apiError('Active ticket already exists for this user', 'ACTIVE_TICKET_EXISTS'),
+        {
+          ...apiError('Active ticket already exists for this user', 'ACTIVE_TICKET_EXISTS'),
+          activeTicket: { id: active.id, displayNumber: active.display_number },
+        },
         409,
       );
     }
@@ -404,3 +408,31 @@ tickets.post('/', async (c) => {
 });
 
 export { tickets };
+
+/**
+ * POST /api/tickets/:id/cancel — the guest who owns the ticket gives up
+ * ("Không đến được nữa · Hủy số"). Only the JWT owner, only while open.
+ */
+tickets.post('/:id/cancel', async (c) => {
+  const bearer = await readGuestBearer(c.req.header('Authorization'), c.env.JWT_SECRET);
+  if (bearer.kind !== 'ok') {
+    return c.json(apiError('Sign in required', 'UNAUTHORIZED'), 401);
+  }
+  const row = await c.env.DB.prepare(
+    `SELECT id, status, zalo_user_id FROM tickets WHERE id = ?1`,
+  )
+    .bind(c.req.param('id'))
+    .first<{ id: string; status: string; zalo_user_id: string | null }>();
+  if (!row || row.zalo_user_id !== bearer.claims.zid) {
+    return c.json(apiError('Ticket not found', 'TICKET_NOT_FOUND'), 404);
+  }
+  if (!['WAITING', 'CALLED', 'HELD'].includes(row.status)) {
+    return c.json(apiError('Ticket is no longer open', 'INVALID_TRANSITION'), 409);
+  }
+  await c.env.DB.prepare(
+    `UPDATE tickets SET status = 'CANCELLED', cancelled_at = ?1 WHERE id = ?2`,
+  )
+    .bind(Date.now(), row.id)
+    .run();
+  return c.json({ id: row.id, status: 'CANCELLED' });
+});

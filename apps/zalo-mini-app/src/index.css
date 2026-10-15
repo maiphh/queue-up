@@ -52,3 +52,49 @@ body { margin: 0; background: var(--d-cream); }
 .zma-stars button { height: 52px; border-radius: 16px; border: 2.5px solid var(--d-line); background: #fff; font: 800 20px var(--d-font-display); cursor: pointer; }
 .zma-stars button[aria-checked='true'] { background: var(--d-yellow); border-color: var(--d-navy); box-shadow: 0 3px 0 var(--d-navy); }
 .zma-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 10px; }
+
+/* Round 4 · G1 marketplace + G2/G3 states */
+.zma-search { height: 46px; border: 2.5px solid var(--d-line); border-radius: 23px; background: #fff; padding: 0 18px; font: 500 15px var(--d-font-body); width: 100%; box-sizing: border-box; }
+.zma-pinned { display: flex; align-items: center; justify-content: space-between; background: var(--d-yellow); border: 2.5px solid var(--d-navy); border-radius: 20px; padding: 10px 16px; color: var(--d-navy); text-decoration: none; box-shadow: 0 4px 0 var(--d-navy); }
+.zma-pinned small { display: block; font: 600 12px var(--d-font-body); }
+.zma-pinned b { font-size: 26px; }
+.zma-pinned span { font: 600 14px var(--d-font-body); }
+.zma-pinned-go { font: 800 26px var(--d-font-display) !important; }
+.zma-chips { overflow-x: auto; gap: 8px; padding-bottom: 2px; }
+.zma-chips .d-chip { flex: none; }
+.zma-link { background: none; border: 0; padding: 0; color: var(--d-navy); font: 700 13px var(--d-font-display); text-decoration: underline; cursor: pointer; }
+.zma-mcard { display: flex; align-items: center; gap: 12px; text-decoration: none; color: inherit; }
+.zma-mcard-body { flex: 1; min-width: 0; }
+.zma-mname { margin: 0; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.zma-mcount { text-align: right; display: flex; flex-direction: column; align-items: flex-end; }
+.zma-mcount b { font-size: 28px; }
+.zma-mcount small { font-size: 11px; }
+.zma-tile-navy { background: var(--d-navy); color: var(--d-yellow); }
+.zma-tile-green { background: var(--d-green); color: #fff; }
+.zma-tile-beige { background: var(--d-beige); color: var(--d-navy); }
+.zma-dim { opacity: .6; }
+.zma-skel { height: 86px; border-radius: 22px; background: #eeeadb; list-style: none; }
+.zma-banner-hot { background: var(--d-hot); color: #fff; }
+.zma-banner-hot p { color: #fff; }
+.zma-errrow { display: flex; align-items: center; gap: 10px; background: var(--d-hot-soft); color: var(--d-hot); border-radius: 16px; padding: 8px 12px; font: 600 13.5px var(--d-font-body); }
+.zma-errrow p { margin: 0; }
+.zma-svc { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; padding: 12px 14px; border: 2.5px solid var(--d-line); border-radius: 20px; background: #fff; cursor: pointer; margin-top: 8px; }
+.zma-svc[aria-checked='true'] { border-color: var(--d-navy); background: var(--d-yellow-soft); box-shadow: 0 4px 0 var(--d-navy); }
+.zma-svc .zma-svc-p { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; background: var(--d-yellow); color: var(--d-navy); font: 800 18px var(--d-font-display); border: 2px solid var(--d-navy); flex: none; }
+.zma-svc .zma-svc-b { flex: 1; }
+.zma-svc b { display: block; font: 700 15.5px var(--d-font-display); }
+.zma-svc small { font: 500 12.5px var(--d-font-body); color: var(--d-muted); }
+.zma-svc .zma-svc-n { text-align: right; font: 800 20px var(--d-font-display); color: var(--d-navy); }
+.zma-svc .zma-svc-n small { display: block; font-weight: 500; }
+.zma-progress { width: 100%; max-width: 280px; height: 10px; border-radius: 5px; background: #e8e4d2; overflow: hidden; }
+.zma-progress i { display: block; height: 100%; width: 40%; background: var(--d-green); border-radius: 5px; animation: zma-indet 1.4s ease-in-out infinite; }
+@keyframes zma-indet { 0% { transform: translateX(-100%); } 100% { transform: translateX(250%); } }
+@media (prefers-reduced-motion: reduce) { .zma-progress i { animation: none; width: 60%; } }
+.zma-struck { text-decoration: line-through; color: #9b988a !important; }
+.zma-ticket-grey { background: #efede4 !important; border-color: #cfccbe !important; filter: grayscale(1); }
+.zma-ring { width: 54px; height: 54px; flex: none; }
+.zma-latebox { display: flex; align-items: center; gap: 12px; background: var(--d-hot-soft); border-radius: 18px; padding: 10px 14px; color: var(--d-hot); font: 600 13.5px var(--d-font-body); }
+.zma-latebox b { font: 800 18px var(--d-font-display); }
+.zma-track-grey i { background: #b9b6a8 !important; }
+.zma-latebox small { display: block; font-weight: 500; opacity: 0.85; }
+.zma-mcard .d-chip { white-space: nowrap; }

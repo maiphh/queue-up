@@ -5,7 +5,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useLocation, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { guestCopy, type WsServerEvent } from '@luotdi/shared';
 import {
   BeVe,
@@ -45,6 +45,10 @@ type TicketPayload = {
 
 const POLL_MS = 15_000;
 
+function hhmm(ms: number): string {
+  return new Intl.DateTimeFormat('vi-VN', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Ho_Chi_Minh' }).format(ms);
+}
+
 function mmss(ms: number): string {
   const s = Math.max(0, Math.ceil(ms / 1000));
   return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
@@ -76,6 +80,8 @@ function Steps({ phase }: { phase: GuestPhase }) {
 export function LivePassPage() {
   const { ticketId } = useParams<{ ticketId: string }>();
   const location = useLocation();
+  const navigate = useNavigate();
+  const [cancelling, setCancelling] = useState(false);
   const justIssued = Boolean((location.state as { justIssued?: boolean } | null)?.justIssued);
 
   const [ticket, setTicket] = useState<TicketPayload | null>(null);
@@ -296,12 +302,32 @@ export function LivePassPage() {
 
   if (phase === 'cancelled') {
     return (
-      <section data-testid="live-pass" className="zma-page zma-center">
+      <section data-testid="live-pass" className="zma-page zma-center" data-screen="cancelled">
         <BeVe pose="offline" size={120} />
-        <p className="d-bubble">{guestCopy.cancelledBody}</p>
+        <h1 className="d-lx zma-h1">{guestCopy.cancelledTitle}</h1>
+        <div className="d-ticket zma-ticket-grey" data-testid="ticket-cancelled">
+          <div data-testid="ticket-display-number" className="d-num d-num-hero zma-num zma-struck">{ticket.displayNumber}</div>
+          <p className="zma-tsub">{table} · {ticket.branchName}</p>
+        </div>
+        <p className="d-muted">{guestCopy.cancelledHint}</p>
+        <div className="zma-cta">
+          <button type="button" className="d-btn d-btn-green" onClick={() => navigate('/')}>{guestCopy.newTicket}</button>
+        </div>
       </section>
     );
   }
+
+  const cancel = async () => {
+    setCancelling(true);
+    try {
+      const res = await apiFetch(`/api/tickets/${ticket.id}/cancel`, { method: 'POST' });
+      if (res.ok) setTicket({ ...ticket, status: 'CANCELLED' });
+    } catch {
+      setOffline(true);
+    } finally {
+      setCancelling(false);
+    }
+  };
 
   // ── Screens 2/3 · Waiting / Almost (+ late, paused) ─────────────────
   const almost = phase === 'almost';
@@ -320,7 +346,7 @@ export function LivePassPage() {
         </div>
       ) : null}
       {late ? (
-        <div className="zma-banner zma-banner-yellow" role="alert" data-testid="late-banner">
+        <div className="zma-banner zma-banner-hot" role="alert" data-testid="late-banner">
           <BeVe ref={mascotRef} pose="late" size={64} />
           <div><b className="d-lx">{guestCopy.lateTitle}</b><p>{guestCopy.lateBody}</p></div>
         </div>
@@ -332,10 +358,18 @@ export function LivePassPage() {
         </div>
       ) : null}
 
-      <div ref={ticketRef} data-testid="live-pass-chassis" data-phase={phase} className="d-ticket">
+      <div ref={ticketRef} data-testid="live-pass-chassis" data-phase={phase} className={offline ? 'd-ticket zma-ticket-grey' : 'd-ticket'}>
         <div className="zma-row zma-between">
           <span>{guestCopy.ticketLabel}</span>
-          <span className={almost ? 'd-chip' : 'd-chip d-chip-navy'}>{almost ? guestCopy.statusSoon : guestCopy.statusWaiting}</span>
+          {offline ? (
+            <span className="d-chip" data-testid="chip-stale">{guestCopy.notUpdated}</span>
+          ) : late && ticket.calledAt ? (
+            <span className="d-chip d-chip-yellow" data-testid="chip-called">{guestCopy.calledAt(hhmm(ticket.calledAt))}</span>
+          ) : paused ? (
+            <span className="d-chip d-chip-yellow" data-testid="chip-holding">{guestCopy.holdingTurn}</span>
+          ) : (
+            <span className={almost ? 'd-chip' : 'd-chip d-chip-navy'}>{almost ? guestCopy.statusSoon : guestCopy.statusWaiting}</span>
+          )}
         </div>
         <div data-testid="ticket-display-number" className="d-num d-num-hero zma-num">{ticket.displayNumber}</div>
         <p className="zma-tsub">{table} · {ticket.paxCount} khách · {ticket.branchName}</p>
@@ -343,19 +377,36 @@ export function LivePassPage() {
         <div data-testid="live-pass-metrics" className="d-metrics" aria-live="polite">
           <div><span>{guestCopy.nowServing}</span><b ref={servingRef}>{ticket.nowServing}</b></div>
           <div><span>{guestCopy.ahead}</span><b>{ticket.partiesAhead} <small>{guestCopy.groups}</small></b></div>
-          <div><span>{guestCopy.estWait}</span><b>{ticket.estimatedWaitMins} <small>{guestCopy.minutes}</small></b></div>
+          <div><span>{guestCopy.estWait}</span>{paused ? <b data-testid="wait-paused">—</b> : <b>{ticket.estimatedWaitMins} <small>{guestCopy.minutes}</small></b>}</div>
         </div>
       </div>
 
       <div className="d-card">
         <Steps phase={phase} />
-        <div className="d-track" style={{ marginTop: 12 }}>
+        <div className={offline ? 'd-track zma-track-grey' : 'd-track'} style={{ marginTop: 12 }}>
           <i ref={progressRef} style={{ transform: `scaleX(${progress})` }} />
         </div>
         <p className="zma-row zma-between d-muted" style={{ marginTop: 8 }}>
-          <small>{guestCopy.turnsLeft(ticket.partiesAhead)}</small>
+          <small>{paused ? guestCopy.pausedFoot : guestCopy.turnsLeft(ticket.partiesAhead)}</small>
         </p>
       </div>
+
+      {late && graceEndsAt ? (
+        <div className="zma-latebox" data-testid="late-hold">
+          <span className="zma-hold-ring" style={{ ['--p' as string]: String(Math.max(0, graceEndsAt - now) / ((ticket.graceMins ?? 5) * 60_000)) }} />
+          <div>
+            <b className="d-num">{mmss(graceEndsAt - now)}</b> {guestCopy.holdLeft}
+            <small>{guestCopy.holdLeftBody}</small>
+          </div>
+        </div>
+      ) : null}
+
+      {offline ? (
+        <div className="zma-cta">
+          <button type="button" className="d-btn d-btn-yellow" onClick={() => void load()}>{guestCopy.retryNow}</button>
+          <p className="zma-foot">{guestCopy.autoResume}</p>
+        </div>
+      ) : null}
 
       {!almost && !late ? (
         <div className="zma-row zma-greet">
@@ -364,7 +415,18 @@ export function LivePassPage() {
         </div>
       ) : null}
 
-      {almost ? (
+      {late && !offline ? (
+        <div className="zma-cta">
+          <button type="button" className="d-btn d-btn-green" onClick={() => setAck(true)} disabled={ack}>
+            {ack ? guestCopy.onMyWayAck : guestCopy.onMyWay}
+          </button>
+          <button type="button" className="zma-link" style={{ alignSelf: 'center' }} disabled={cancelling} onClick={() => void cancel()}>
+            {guestCopy.notComing}
+          </button>
+        </div>
+      ) : null}
+
+      {almost && !offline ? (
         <div className="zma-cta">
           <button type="button" className="d-btn d-btn-green" onClick={() => setAck(true)} disabled={ack}>
             {ack ? guestCopy.onMyWayAck : guestCopy.onMyWay}

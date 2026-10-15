@@ -445,7 +445,7 @@ describe('Customer flow — marketplace discovery', () => {
     renderApp('/');
 
     expect(
-      await screen.findByRole('heading', { name: guestCopy.marketplaceTitle }),
+      await screen.findByRole('heading', { name: guestCopy.marketTitle }),
     ).toBeInTheDocument();
     expect(screen.queryByText(/Marketplace/i)).not.toBeInTheDocument();
 
@@ -459,7 +459,7 @@ describe('Customer flow — marketplace discovery', () => {
     expect(within(list).getByText('6')).toBeInTheDocument();
     expect(within(list).getByText('4')).toBeInTheDocument();
     expect(within(list).getByText('2')).toBeInTheDocument();
-    expect(within(list).getAllByText(guestCopy.waiting).length).toBeGreaterThan(
+    expect(within(list).getAllByText(guestCopy.groupsWaitingShort).length).toBeGreaterThan(
       0,
     );
   });
@@ -571,6 +571,99 @@ describe('Lấy số button — regression for "cannot tap" in Zalo', () => {
     expect(screen.getByTestId('identity-error')).toHaveTextContent(guestCopy.authFailed);
     await user.click(screen.getByRole('button', { name: guestCopy.retry }));
     expect(retry).toHaveBeenCalled();
+  });
+});
+
+describe('Round 4 · G2/G3 states', () => {
+  afterEach(() => { vi.unstubAllGlobals(); ticketOverride.value = {}; });
+
+  it('paused branch: sleeping Bé Vé, Lấy số disabled, link to other branches', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ ...BRANCH_PAYLOAD, isPaused: true })));
+    renderApp(`/b/${QR_TOKEN}`);
+    expect(await screen.findByTestId('join-paused')).toHaveTextContent(guestCopy.pausedTitle);
+    expect(screen.getByRole('button', { name: guestCopy.issuePass })).toBeDisabled();
+    expect(screen.getByRole('button', { name: guestCopy.otherNearby })).toBeInTheDocument();
+  });
+
+  it('404 QR shows the not-found screen', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ code: 'BRANCH_NOT_FOUND' }, { status: 404 })));
+    renderApp(`/b/${QR_TOKEN}`);
+    expect(await screen.findByText(guestCopy.notFoundTitle)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: guestCopy.findNearby })).toBeInTheDocument();
+  });
+
+  it('duplicate ticket pins the existing number and links to it', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (_u: RequestInfo | URL, init?: RequestInit) =>
+      init?.method === 'POST'
+        ? Response.json({ code: 'ACTIVE_TICKET_EXISTS', activeTicket: { id: TICKET_ID, displayNumber: 'A·009' } }, { status: 409 })
+        : Response.json(BRANCH_PAYLOAD)));
+    const user = userEvent.setup();
+    renderApp(`/b/${QR_TOKEN}`);
+    await screen.findByRole('heading', { name: /Pho 24/ });
+    await user.click(screen.getByRole('button', { name: guestCopy.issuePass }));
+    expect(await screen.findByTestId('dupe-ticket')).toBeInTheDocument();
+    expect(screen.getByText('A·009')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: guestCopy.viewMyTicket })).toBeInTheDocument();
+  });
+
+  it('cancelled ticket is struck through with Lấy số mới', async () => {
+    vi.stubGlobal('fetch', mockFetchRouter());
+    ticketOverride.value = { status: 'CANCELLED' };
+    renderApp(`/ticket/${TICKET_ID}`);
+    expect(await screen.findByTestId('ticket-cancelled')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: guestCopy.newTicket })).toBeInTheDocument();
+  });
+
+  it('paused ticket shows Đang giữ lượt and a dash for wait', async () => {
+    vi.stubGlobal('fetch', mockFetchRouter());
+    ticketOverride.value = { isPaused: true };
+    renderApp(`/ticket/${TICKET_ID}`);
+    expect(await screen.findByTestId('chip-holding')).toHaveTextContent(guestCopy.holdingTurn);
+    expect(screen.getByTestId('wait-paused')).toHaveTextContent('—');
+  });
+
+  it('late ticket offers Mình đang đến and cancel, which POSTs /cancel', async () => {
+    const f = mockFetchRouter();
+    f.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith('/cancel')) return Response.json({ id: TICKET_ID, status: 'CANCELLED' });
+      return Response.json({ ...TICKET_PAYLOAD, status: 'HELD', calledAt: Date.now() - 60_000, graceMins: 5, ...(init ? {} : {}) });
+    });
+    vi.stubGlobal('fetch', f);
+    const user = userEvent.setup();
+    renderApp(`/ticket/${TICKET_ID}`);
+    expect(await screen.findByTestId('chip-called')).toBeInTheDocument();
+    expect(screen.getByTestId('late-hold')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: guestCopy.notComing }));
+    expect(await screen.findByTestId('ticket-cancelled')).toBeInTheDocument();
+  });
+});
+
+describe('Round 4 · G1 marketplace', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('pins the active ticket, shows paused + wait chips, and an empty search state', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({
+      branches: [
+        { id: 'b1', name: 'Quán Một', category: 'RESTAURANT', waitingCount: 3, district: 'Q1', estimatedWaitMins: 12, isPaused: false },
+        { id: 'b2', name: 'Quán Hai', category: 'CAFE', waitingCount: 0, district: 'Q3', estimatedWaitMins: null, isPaused: true },
+      ],
+      activeTicket: { id: TICKET_ID, displayNumber: 'A·014', status: 'WAITING', branchId: 'b1', branchName: 'Quán Một', partiesAhead: 2 },
+      located: false,
+    })));
+    const user = userEvent.setup();
+    renderApp('/');
+    expect(await screen.findByTestId('active-ticket')).toHaveTextContent('A·014');
+    expect(within(screen.getByTestId('market-b1')).getByText(`~12 ${guestCopy.minutes}`)).toBeInTheDocument();
+    expect(within(screen.getByTestId('market-b2')).getByText(guestCopy.paused)).toBeInTheDocument();
+    await user.type(screen.getByRole('searchbox'), 'zzzz');
+    expect(screen.getByTestId('market-empty')).toBeInTheDocument();
+  });
+
+  it('shows the error state with retry when the list fails', async () => {
+    sessionStorage.clear();
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('x', { status: 500 })));
+    renderApp('/');
+    expect(await screen.findByTestId('market-error')).toBeInTheDocument();
   });
 });
 
