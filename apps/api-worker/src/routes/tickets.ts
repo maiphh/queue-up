@@ -7,6 +7,7 @@ import {
 } from '@luotdi/shared';
 import { Hono } from 'hono';
 import type { Env } from '../index'; // type-only — avoid runtime cycle with route mount
+import { readGuestBearer } from '../services/jwt';
 
 const MIDDLE_DOT = '\u00B7';
 
@@ -180,6 +181,19 @@ tickets.post('/', async (c) => {
   const req = parsed.data;
   const db = c.env.DB;
 
+  // Guest identity comes ONLY from a verified JWT (POST /api/auth/zalo).
+  // A client-sent zaloUserId is never trusted (stripped by the schema).
+  // No Authorization header = anonymous ticket (no per-user dedupe);
+  // a present-but-invalid/expired token is rejected.
+  const bearer = await readGuestBearer(
+    c.req.header('Authorization'),
+    c.env.JWT_SECRET,
+  );
+  if (bearer.kind === 'invalid') {
+    return c.json(apiError('Invalid or expired session', 'UNAUTHORIZED'), 401);
+  }
+  const zaloUserId = bearer.kind === 'ok' ? bearer.claims.zid : null;
+
   const branch = await db
     .prepare(
       `SELECT id, merchant_id, routing_mode, is_paused
@@ -215,7 +229,7 @@ tickets.post('/', async (c) => {
     );
   }
 
-  if (req.zaloUserId) {
+  if (zaloUserId) {
     const active = await db
       .prepare(
         `SELECT id FROM tickets
@@ -224,7 +238,7 @@ tickets.post('/', async (c) => {
            AND status IN ('WAITING', 'CALLED', 'HELD')
          LIMIT 1`,
       )
-      .bind(req.branchId, req.zaloUserId)
+      .bind(req.branchId, zaloUserId)
       .first<{ id: string }>();
 
     if (active) {
@@ -308,7 +322,7 @@ tickets.post('/', async (c) => {
         ticketId,
         req.branchId,
         ticketDate,
-        req.zaloUserId ?? null,
+        zaloUserId,
         req.customerName,
         paxCount,
         source,

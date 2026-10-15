@@ -9,6 +9,7 @@ import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 /** Ensure worker main is loaded for SELF / watch re-runs. */
 import '../src/index';
+import { signGuestJwt } from '../src/services/jwt';
 
 const MERCHANT_ID = 'merchant-1';
 const BRANCH_ID = 'branch-1';
@@ -155,14 +156,23 @@ async function seedMerchantBranchBuckets(
   }
 }
 
+/** Issue a guest JWT the same way /api/auth/zalo does. */
+async function guestToken(zaloUserId: string): Promise<string> {
+  return signGuestJwt(env.JWT_SECRET!, { sub: `guest-${zaloUserId}`, zid: zaloUserId });
+}
+
 async function postTicket(
-  body: CreateTicketRequest,
+  body: CreateTicketRequest & { zaloUserId?: string },
+  extraBody: Record<string, unknown> = {},
 ): Promise<Response> {
-  const parsed = CreateTicketRequestSchema.parse(body);
+  const { zaloUserId, ...rest } = body;
+  const parsed = CreateTicketRequestSchema.parse(rest);
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (zaloUserId) headers.Authorization = `Bearer ${await guestToken(zaloUserId)}`;
   return SELF.fetch('http://localhost/api/tickets', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(parsed),
+    headers,
+    body: JSON.stringify({ ...parsed, ...extraBody }),
   });
 }
 
@@ -277,5 +287,71 @@ describe('POST /api/tickets — concurrency-safe issuance', () => {
     expect(res.status).toBe(402);
     const err = ApiErrorSchema.parse(await res.json());
     expect(err.code).toBe('FREE_QUOTA_EXCEEDED');
+  });
+
+  it('ignores a client-sent zaloUserId and stores the JWT identity', async () => {
+    const res = await postTicket(
+      {
+        branchId: BRANCH_ID,
+        paxCount: 2,
+        zaloUserId: 'zalo-real-owner',
+        customerName: 'Real Owner',
+      },
+      { zaloUserId: 'zalo-victim' },
+    );
+    expect(res.status).toBe(200);
+    const { id } = CreateTicketResponseSchema.parse(await res.json());
+    const row = await env.DB.prepare('SELECT zalo_user_id FROM tickets WHERE id = ?')
+      .bind(id)
+      .first<{ zalo_user_id: string | null }>();
+    expect(row?.zalo_user_id).toBe('zalo-real-owner');
+  });
+
+  it('anonymous body zaloUserId cannot trigger or bypass per-user dedupe', async () => {
+    const first = await postTicket(
+      { branchId: BRANCH_ID, paxCount: 2, customerName: 'Anon' },
+      { zaloUserId: 'zalo-spoof' },
+    );
+    expect(first.status).toBe(200);
+    const { id } = CreateTicketResponseSchema.parse(await first.json());
+    const row = await env.DB.prepare('SELECT zalo_user_id FROM tickets WHERE id = ?')
+      .bind(id)
+      .first<{ zalo_user_id: string | null }>();
+    expect(row?.zalo_user_id).toBeNull();
+  });
+
+  it('returns 401 for an invalid or tampered Bearer token', async () => {
+    const good = await guestToken('zalo-x');
+    const tampered = good.slice(0, -2) + (good.endsWith('A') ? 'BB' : 'AA');
+    for (const token of ['not-a-jwt', tampered]) {
+      const res = await SELF.fetch('http://localhost/api/tickets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ branchId: BRANCH_ID, paxCount: 2, customerName: 'X' }),
+      });
+      expect(res.status).toBe(401);
+    }
+  });
+
+  it('answers CORS preflight for https://h5.zdn.vn only', async () => {
+    const ok = await SELF.fetch('http://localhost/api/tickets', {
+      method: 'OPTIONS',
+      headers: {
+        Origin: 'https://h5.zdn.vn',
+        'Access-Control-Request-Method': 'POST',
+        'Access-Control-Request-Headers': 'authorization,content-type',
+      },
+    });
+    expect(ok.status).toBeLessThan(300);
+    expect(ok.headers.get('Access-Control-Allow-Origin')).toBe('https://h5.zdn.vn');
+    expect(ok.headers.get('Access-Control-Allow-Headers')?.toLowerCase()).toContain(
+      'authorization',
+    );
+
+    const bad = await SELF.fetch('http://localhost/api/tickets', {
+      method: 'OPTIONS',
+      headers: { Origin: 'https://evil.example', 'Access-Control-Request-Method': 'POST' },
+    });
+    expect(bad.headers.get('Access-Control-Allow-Origin')).toBeNull();
   });
 });

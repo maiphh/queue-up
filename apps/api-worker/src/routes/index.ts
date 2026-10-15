@@ -1,3 +1,4 @@
+export { auth } from './auth';
 export { admin } from './admin';
 export { branches } from './branches';
 export { client } from './client';

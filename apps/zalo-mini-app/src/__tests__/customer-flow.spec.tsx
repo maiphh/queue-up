@@ -117,12 +117,18 @@ const queueSocket = vi.hoisted(() => {
   };
 });
 
-vi.mock('../hooks/useZaloIdentity', () => ({
-  useZaloIdentity: vi.fn(() => ({
-    zaloUserId: 'zalo-user-test-1',
-    customerName: 'Test Guest',
+const identityMock = vi.hoisted(() => ({
+  value: {
+    status: 'ready' as 'ready' | 'loading' | 'error',
     ready: true,
-  })),
+    customerName: 'Test Guest',
+    error: null as string | null,
+    retry: () => {},
+  },
+}));
+
+vi.mock('../hooks/useZaloIdentity', () => ({
+  useZaloIdentity: vi.fn(() => identityMock.value),
 }));
 
 vi.mock('../hooks/useQueueSocket', () => ({
@@ -289,10 +295,11 @@ describe('Customer flow — 1-tap issue pass', () => {
       expect.objectContaining({
         branchId: BRANCH_ID,
         paxCount: 2,
-        zaloUserId: 'zalo-user-test-1',
         customerName: 'Test Guest',
       }),
     );
+    // Identity is never sent by the client (JWT Bearer only).
+    expect(body).not.toHaveProperty('zaloUserId');
 
     expect(
       await screen.findByText(DISPLAY_NUMBER, {}, { timeout: 3000 }),
@@ -437,5 +444,65 @@ describe('Customer flow — marketplace discovery', () => {
     expect(within(list).getByText(/Pho 24 — Nguyen Hue/i)).toBeInTheDocument();
     expect(within(list).getByText(/District Clinic/i)).toBeInTheDocument();
     expect(within(list).getByText(/The Coffee House/i)).toBeInTheDocument();
+  });
+});
+
+describe('Lấy số button — regression for "cannot tap" in Zalo', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    identityMock.value = { ...identityMock.value, status: 'ready', ready: true, error: null };
+  });
+
+  it('SERVICE_TYPE branch (clinic) is tappable: sends bucketId instead of pax', async () => {
+    const clinic = {
+      ...BRANCH_PAYLOAD,
+      routingMode: 'SERVICE_TYPE',
+      buckets: [
+        { id: 'bucket-gen', prefix: 'G', labelVi: 'KHÁM TỔNG QUÁT', minPax: 1, maxPax: 1, partiesWaiting: 0, estimatedWaitMins: 5 },
+        { id: 'bucket-lab', prefix: 'L', labelVi: 'XÉT NGHIỆM', minPax: 1, maxPax: 1, partiesWaiting: 0, estimatedWaitMins: 8 },
+      ],
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if ((init?.method ?? 'GET') === 'POST') return Response.json({ id: TICKET_ID });
+      if (url.includes('/api/branches/by-qr/')) return Response.json(clinic);
+      return Response.json(TICKET_PAYLOAD);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    renderApp(`/b/${QR_TOKEN}`);
+    await screen.findByRole('heading', { name: /Pho 24/ });
+
+    const btn = screen.getByRole('button', { name: guestCopy.issuePass });
+    expect(btn).toBeEnabled();
+    await user.click(screen.getByRole('radio', { name: 'XÉT NGHIỆM' }));
+    await user.click(btn);
+    await waitFor(() => {
+      const post = fetchMock.mock.calls.find(([, i]) => i?.method === 'POST');
+      expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({ bucketId: 'bucket-lab' });
+    });
+  });
+
+  it('party size with no bucket explains why instead of a silent dead button', async () => {
+    const cafe = { ...BRANCH_PAYLOAD, buckets: BRANCH_PAYLOAD.buckets.slice(0, 2) };
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json(cafe)));
+    const user = userEvent.setup();
+    renderApp(`/b/${QR_TOKEN}`);
+    await screen.findByRole('heading', { name: /Pho 24/ });
+    await user.click(screen.getByRole('radio', { name: '8+' }));
+    expect(screen.getByTestId('no-bucket')).toHaveTextContent(guestCopy.noBucketForParty);
+    expect(screen.getByRole('button', { name: guestCopy.issuePass })).toBeDisabled();
+  });
+
+  it('identity failure shows the error and a retry instead of a forever-disabled button', async () => {
+    const retry = vi.fn();
+    identityMock.value = { status: 'error', ready: false, customerName: 'Khách', error: 'x', retry };
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json(BRANCH_PAYLOAD)));
+    const user = userEvent.setup();
+    renderApp(`/b/${QR_TOKEN}`);
+    await screen.findByRole('heading', { name: /Pho 24/ });
+    expect(screen.getByTestId('identity-error')).toHaveTextContent(guestCopy.authFailed);
+    await user.click(screen.getByRole('button', { name: guestCopy.retry }));
+    expect(retry).toHaveBeenCalled();
   });
 });

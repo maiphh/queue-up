@@ -104,3 +104,17 @@ CREATE TABLE staff_branch_assignments (
   branch_id TEXT NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
   PRIMARY KEY (staff_id, branch_id)
 );
+
+CREATE TABLE guest_users (
+  id TEXT PRIMARY KEY,
+  zalo_user_id TEXT UNIQUE NOT NULL, -- Graph `id` per Zalo App (see migrations/0001_guest_users.sql)
+  zalo_oa_uid TEXT,
+  display_name TEXT,
+  avatar_url TEXT,
+  phone_e164 TEXT,
+  notify_opt_in INTEGER NOT NULL DEFAULT 0,
+  oa_followed_at INTEGER,
+  last_interaction_at INTEGER,
+  created_at INTEGER NOT NULL,
+  deleted_at INTEGER
+);
