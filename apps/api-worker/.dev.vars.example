@@ -1,0 +1,5 @@
+# Local-only Worker vars for `wrangler dev`. Copy to .dev.vars (pnpm dev does
+# this automatically). NEVER use these values in production.
+ENVIRONMENT=dev
+JWT_SECRET=local-dev-only-jwt-secret-change-me-0123456789
+ZALO_APP_SECRET=local-dev-only-zalo-app-secret

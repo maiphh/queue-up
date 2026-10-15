@@ -50,17 +50,30 @@ auth.post('/zalo', async (c) => {
 });
 
 /**
- * POST /api/auth/dev { devUserId } — browser-only dev login.
- * Enabled only when ENVIRONMENT === 'dev'; 404 everywhere else.
+ * POST /api/auth/dev { devUserId?, name? } — browser-only dev login.
+ * Enabled only when ENVIRONMENT === 'dev' (local .dev.vars); 404 everywhere else.
  */
 auth.post('/dev', async (c) => {
-  if (c.env.ENVIRONMENT !== 'dev' || !c.env.JWT_SECRET) {
+  if (c.env.ENVIRONMENT !== 'dev') {
     return c.json(apiError('Not found', 'NOT_FOUND'), 404);
   }
-  const body = (await c.req.json().catch(() => ({}))) as { devUserId?: unknown };
-  const devId =
-    typeof body.devUserId === 'string' && body.devUserId ? body.devUserId : 'dev-guest';
-  const profile = { id: `dev:${devId}`, name: 'Dev Guest' };
+  if (!c.env.JWT_SECRET) {
+    return c.json(
+      apiError(
+        'JWT_SECRET missing: copy apps/api-worker/.dev.vars.example to .dev.vars',
+        'DEV_MISCONFIGURED',
+      ),
+      500,
+    );
+  }
+  const body = (await c.req.json().catch(() => ({}))) as { devUserId?: unknown; name?: unknown };
+  const raw = typeof body.devUserId === 'string' ? body.devUserId.trim() : '';
+  const devId = (raw || 'dev-guest').slice(0, 64);
+  const name =
+    typeof body.name === 'string' && body.name.trim()
+      ? body.name.trim().slice(0, 64)
+      : raw || 'Dev Guest';
+  const profile = { id: `dev:${devId}`, name };
   const guestId = await upsertGuestUser(c.env.DB, profile);
   const token = await signGuestJwt(c.env.JWT_SECRET, {
     sub: guestId,

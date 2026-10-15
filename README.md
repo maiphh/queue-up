@@ -87,11 +87,28 @@ The current mock set includes merchants (PRO restaurant, FREE cafe, PRO clinic),
 | `ZNS_TEMPLATE_APPROACHING_ID` | Approved ZNS template id for "approaching turn" (params: `ticket_number`, `parties_ahead`, `branch_name`) |
 | `ZNS_DEVELOPMENT_MODE` | Optional, `1` sends ZNS with `mode: "development"` |
 
-Vars: `ENVIRONMENT` (`dev` enables `POST /api/auth/dev`; set it to `production` in prod), `CORS_EXTRA_ORIGINS` (comma list, e.g. the `zmp start` preview URL). CORS always allows `https://h5.zdn.vn`.
+Vars: `ENVIRONMENT` (`wrangler.toml` ships `production`, so `POST /api/auth/dev` returns 404 when deployed; local `.dev.vars` sets `dev`), `CORS_EXTRA_ORIGINS` (comma list, e.g. the `zmp start` preview URL). CORS always allows `https://h5.zdn.vn`.
 
 D1 migration: `wrangler d1 migrations apply luotdi-db --remote` (adds `guest_users`).
 
 Auth flow: `getAccessToken()` → `POST /api/auth/zalo { accessToken }` → `{ token }` → `Authorization: Bearer <token>` on `POST /api/tickets`. The ticket's `zalo_user_id` comes only from the JWT.
+
+## Local dev (Windows / macOS / Linux)
+
+```powershell
+corepack enable
+pnpm install
+pnpm dev
+```
+
+On first run, `pnpm dev` creates `apps/api-worker/.dev.vars` from `.dev.vars.example` (`ENVIRONMENT=dev`, dev-only `JWT_SECRET`) and creates and seeds the local D1. Everything is plain Node, so no POSIX shell is needed.
+
+- Worker: http://localhost:8787 · Mini App: http://localhost:5173 · Merchant web: http://localhost:5174
+- Opened in a normal browser (not Zalo), the Mini App logs in through `POST /api/auth/dev` automatically. Use `http://localhost:5173/?as=lan` to be guest "lan"; another name gives another guest.
+- Merchant web has no login in dev, so it needs no bypass.
+- Check: `curl.exe -X POST http://localhost:8787/api/auth/dev -H "Content-Type: application/json" -d "{}"` → 200 with a token.
+- Got a 404 on `/api/auth/dev`? Either `.dev.vars` lacks `ENVIRONMENT=dev` (delete it and rerun `pnpm dev`), or `VITE_API_BASE` in `apps/zalo-mini-app/.env*` points at production. Leave it empty for dev.
+- Reset data: `pnpm --filter api-worker db:reset` (stop `pnpm dev` first on Windows).
 
 ## Workspace
 

@@ -8,8 +8,9 @@ compatibility_flags = ["nodejs_compat"]
 crons = ["0 21 * * *"]
 
 [vars]
-# "dev" enables POST /api/auth/dev (browser-only login). Override per env.
-ENVIRONMENT = "dev"
+# Deployed default: dev login OFF. Local `wrangler dev` overrides this with
+# ENVIRONMENT=dev from .dev.vars (created from .dev.vars.example by `pnpm dev`).
+ENVIRONMENT = "production"
 
 # Secrets — set with `wrangler secret put <NAME>` (locally: .dev.vars, git-ignored):
 #   ZALO_APP_SECRET              Zalo App secret (appsecret_proof for graph.zalo.me)

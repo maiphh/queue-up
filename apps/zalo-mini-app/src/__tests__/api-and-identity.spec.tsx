@@ -63,8 +63,13 @@ describe('useZaloIdentity', () => {
   beforeEach(() => {
     zmp.store.clear();
     setSessionToken(null);
+    // Pretend to be inside Zalo so the real token exchange path runs.
+    vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 Zalo/24.1');
   });
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
 
   it('exchanges the Zalo access token for a JWT; no localStorage', async () => {
     const setItem = vi.spyOn(Storage.prototype, 'setItem');
@@ -109,5 +114,61 @@ describe('useZaloIdentity', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('useZaloIdentity dev bypass (browser, outside Zalo)', () => {
+  beforeEach(() => {
+    zmp.store.clear();
+    setSessionToken(null);
+    zmp.getAccessToken.mockReset();
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+    window.history.replaceState(null, '', '/');
+  });
+
+  const okFetch = () =>
+    vi.fn(async () =>
+      Response.json({ token: 'a.eyJleHAiOjk5OTk5OTk5OTl9.c', guest: { name: 'lan' } }),
+    );
+
+  it('goes straight to /api/auth/dev without calling the Zalo SDK', async () => {
+    const f = okFetch();
+    vi.stubGlobal('fetch', f);
+    const { result } = renderHook(() => useZaloIdentity());
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    const [url, init] = f.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toMatch(/\/api\/auth\/dev$/);
+    expect(JSON.parse(String(init.body))).toEqual({});
+    expect(zmp.getAccessToken).not.toHaveBeenCalled();
+  });
+
+  it('?as=<name> picks the test guest', async () => {
+    window.history.replaceState(null, '', '/?as=lan');
+    const f = okFetch();
+    vi.stubGlobal('fetch', f);
+    const { result } = renderHook(() => useZaloIdentity());
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    const init = (f.mock.calls[0] as unknown as [string, RequestInit])[1];
+    expect(JSON.parse(String(init.body))).toEqual({ devUserId: 'lan' });
+    expect(result.current.customerName).toBe('lan');
+  });
+
+  it('is off in production builds unless VITE_SKIP_ZALO_AUTH=1', async () => {
+    vi.stubEnv('DEV', false);
+    vi.stubEnv('VITE_SKIP_ZALO_AUTH', '');
+    zmp.getAccessToken.mockRejectedValue(new Error('no bridge'));
+    const f = okFetch();
+    vi.stubGlobal('fetch', f);
+    const { result } = renderHook(() => useZaloIdentity());
+    await waitFor(() => expect(result.current.status).toBe('error'));
+    expect(f).not.toHaveBeenCalled();
+
+    vi.stubEnv('VITE_SKIP_ZALO_AUTH', '1');
+    const r2 = renderHook(() => useZaloIdentity());
+    await waitFor(() => expect(r2.result.current.status).toBe('ready'));
+    expect(String((f.mock.calls[0] as unknown as [string])[0])).toMatch(/\/api\/auth\/dev$/);
   });
 });
