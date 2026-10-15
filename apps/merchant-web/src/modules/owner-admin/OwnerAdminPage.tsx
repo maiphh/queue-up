@@ -77,7 +77,7 @@ function ClientPortfolioView() {
           </div>
         ) : !data ? (
           <div data-testid="portfolio-loading" style={{ display: 'grid', gap: 14 }}>
-            <div className="r4-kpis" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>{[0, 1, 2, 3].map((i) => <div key={i} className="r4-skel" style={{ height: 88 }} />)}</div>
+            <div className="r4-kpis">{[0, 1, 2, 3].map((i) => <div key={i} className="r4-skel" style={{ height: 88 }} />)}</div>
             <div className="r4-skel" style={{ height: 200 }} />
             <p className="d-muted" style={{ textAlign: 'center' }}>{c.loading}</p>
           </div>
@@ -89,7 +89,7 @@ function ClientPortfolioView() {
           </div>
         ) : (
           <>
-            <div className="r4-kpis" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }} data-testid="portfolio-kpis">
+            <div className="r4-kpis" data-testid="portfolio-kpis">
               <div className="r4-kpi"><span>{c.kWaiting}</span><b>{data.kpis.waiting} <small>{c.groups}</small></b></div>
               <div className="r4-kpi"><span>{c.kServed}</span><b>{data.kpis.servedToday}</b></div>
               <div className="r4-kpi"><span>{c.kAvg}</span><b>{data.kpis.avgWaitMins ?? '—'} <small>phút</small></b></div>
@@ -102,7 +102,7 @@ function ClientPortfolioView() {
               const [bg, fg] = LOGO_COLOURS[i % LOGO_COLOURS.length]!;
               return (
                 <section key={brand.id} className="r4-card" style={{ background: '#fbfaf3' }} data-testid={`portfolio-brand-${brand.id}`}>
-                  <div className="r4-row" style={{ marginBottom: 12 }}>
+                  <div className="r4-row r4-wrap" style={{ marginBottom: 12 }}>
                     <span className="r4-logo" style={{ background: bg, color: fg }} aria-hidden="true">{initials(brand.name)}</span>
                     <div>
                       <div className="r4-row" style={{ gap: 6 }}>
@@ -116,7 +116,7 @@ function ClientPortfolioView() {
                     <span className="d-muted" style={{ fontSize: 12.5 }}>≈ {brand.walletMessages} {c.msgs}</span>
                     {brand.branches[0] ? <Link className="d-pill r4-pill-sm" to={`/client/branches/${brand.branches[0].id}?tab=wallet`}>{c.topUp}</Link> : null}
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(300px, 100%), 1fr))', gap: 12 }}>
                     {brand.branches.map((b) => (
                       <article key={b.id} className="r4-card" data-testid={`portfolio-branch-${b.id}`} style={{ padding: 14 }}>
                         <div className="r4-row" style={{ alignItems: 'flex-start' }}>
@@ -126,12 +126,12 @@ function ClientPortfolioView() {
                           </div>
                           <span className={b.isPaused ? 'r4-sc r4-sc-y' : 'r4-sc r4-sc-g'}><i />{b.isPaused ? c.statusPaused : c.statusOpen}</span>
                         </div>
-                        <div className="r4-row" style={{ margin: '10px 0', gap: 14, font: '500 13px var(--d-font-body)' }}>
-                          <span><b style={{ font: '800 26px var(--d-font-display)', color: 'var(--d-navy)' }}>{b.waitingCount}</b> {c.waiting}</span>
-                          <span><b style={{ font: '700 15px var(--d-font-display)' }}>{b.avgWaitMins == null ? '—' : `${b.avgWaitMins} phút`}</b> {c.avgShort}</span>
-                          <span><b style={{ font: '700 15px var(--d-font-display)' }}>{b.servedToday}</b> {c.today}</span>
+                        <div className="r4-stats">
+                          <span className="r4-stat"><b className="r4-stat-hero">{b.waitingCount}</b><small>{c.waiting}</small></span>
+                          <span className="r4-stat"><b>{b.avgWaitMins == null ? '—' : `${b.avgWaitMins} phút`}</b><small>{c.avgShort}</small></span>
+                          <span className="r4-stat"><b>{b.servedToday}</b><small>{c.today}</small></span>
                         </div>
-                        <div className="r4-row">
+                        <div className="r4-actions">
                           <Link className="d-pill d-pill-go r4-pill-sm" to={`/manage/${b.id}`}>{c.viewFloor}</Link>
                           <Link className="d-pill r4-pill-sm" to={`/client/branches/${b.id}`}>{c.setup}</Link>
                           <a className="d-pill r4-pill-sm" href={`/tv/${b.tvSlug}`} target="_blank" rel="noreferrer">TV</a>

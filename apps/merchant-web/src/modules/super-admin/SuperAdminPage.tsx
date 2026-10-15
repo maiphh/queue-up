@@ -142,7 +142,7 @@ export function SuperAdminPage() {
           </div>
         ) : !data ? (
           <div data-testid="admin-loading" style={{ display: 'grid', gap: 14 }}>
-            <div className="r4-kpis" style={{ gridTemplateColumns: 'repeat(5, 1fr)' }}>{[0, 1, 2, 3, 4].map((i) => <div key={i} className="r4-skel" style={{ height: 88 }} />)}</div>
+            <div className="r4-kpis">{[0, 1, 2, 3, 4].map((i) => <div key={i} className="r4-skel" style={{ height: 88 }} />)}</div>
             {[0, 1, 2, 3].map((i) => <div key={i} className="r4-skel" style={{ height: 44 }} />)}
             <p className="d-muted" style={{ textAlign: 'center' }}>{a.loading}</p>
           </div>
@@ -155,7 +155,7 @@ export function SuperAdminPage() {
           </div>
         ) : (
           <>
-            <div className="r4-kpis" style={{ gridTemplateColumns: 'repeat(5, 1fr)' }} data-testid="admin-kpis">
+            <div className="r4-kpis" data-testid="admin-kpis">
               <div className="r4-kpi"><span>{a.kWaiting}</span><b>{data.kpis.waitingTotal}</b></div>
               <div className="r4-kpi"><span>{a.kToday}</span><b>{data.kpis.ticketsToday}</b></div>
               <div className="r4-kpi"><span>{a.kPaused}</span><b>{data.kpis.pausedBranches}</b></div>

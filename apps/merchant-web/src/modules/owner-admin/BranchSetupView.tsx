@@ -229,7 +229,7 @@ export function BranchSetupView({ branchId }: { branchId: string }) {
               </div>
               {buckets.map((b, i) => (
                 <div key={b.prefix} className="r4-setrow" data-testid={`bucket-row-${b.prefix}`} style={{ flexWrap: 'wrap', gap: 12, opacity: b.isActive ? 1 : 0.55 }}>
-                  <span className="d-ticket" style={{ fontSize: 22, minWidth: 44, textAlign: 'center' }}>{b.prefix}</span>
+                  <span className="d-tk" style={{ fontSize: 22, minWidth: 48, padding: '6px 10px' }}>{b.prefix}</span>
                   <div style={{ minWidth: 110 }}>
                     <b style={{ font: '700 15px var(--d-font-display)' }}>{c.bucketName(b.prefix)}</b>
                     <div className="d-muted" style={{ fontSize: 12.5 }}>{c.firstNumber} {b.prefix}{D}{String((b.issued ?? 0) + 1).padStart(3, '0')}</div>

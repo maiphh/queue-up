@@ -83,7 +83,7 @@ export function ReportsPage() {
 
       {loading && !data ? (
         <div data-testid="reports-loading" style={{ display: 'grid', gap: 14 }}>
-          <div className="r4-kpis" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
+          <div className="r4-kpis">
             {[0, 1, 2, 3].map((i) => <div key={i} className="r4-skel" style={{ height: 92 }} />)}
           </div>
           <div className="r4-card r4-center" style={{ minHeight: 280 }}>
@@ -99,7 +99,7 @@ export function ReportsPage() {
         </div>
       ) : data ? (
         <>
-          <div className="r4-kpis" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
+          <div className="r4-kpis">
             <div className="r4-kpi"><span>{r.kServed}</span><b>{data.kpis.served} <small>{r.groups}</small></b><Delta v={data.kpis.deltas.servedPct} unit="%" upGood /></div>
             <div className="r4-kpi"><span>{r.kWait}</span><b>{data.kpis.avgWaitMins} <small>phút</small></b><Delta v={data.kpis.deltas.avgWaitMins} unit=" phút" upGood={false} /></div>
             <div className="r4-kpi"><span>{r.kLost}</span><b>{data.kpis.lostPct.toLocaleString('vi-VN')}<small>%</small></b><Delta v={data.kpis.deltas.lostPts} unit={` ${r.pts}`} upGood={false} /></div>
@@ -132,7 +132,7 @@ export function ReportsPage() {
                   <tbody>
                     {data.buckets.map((b) => (
                       <tr key={b.prefix}>
-                        <td><span className="d-ticket" style={{ fontSize: 14 }}>{b.prefix}</span></td>
+                        <td><span className="d-tk" style={{ minWidth: 40 }}>{b.prefix}</span></td>
                         <td>{b.label}</td>
                         <td><b>{b.served}</b></td>
                         <td><span className={b.avgWaitMins >= 25 ? 'r4-sc r4-sc-h' : b.avgWaitMins >= 15 ? 'r4-sc r4-sc-y' : 'r4-sc r4-sc-m'}>{b.avgWaitMins} phút</span></td>

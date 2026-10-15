@@ -175,7 +175,7 @@ export function HistoryPage() {
         </div>
       ) : (
         <>
-          <div className="r4-kpis" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
+          <div className="r4-kpis">
             {data ? (
               <>
                 <div className="r4-kpi"><b>{data.stats.issued} <small>{h.statIssued}</small></b></div>
@@ -201,7 +201,7 @@ export function HistoryPage() {
                   <tbody>
                     {data?.rows.map((r) => (
                       <tr key={r.id} className="r4-click" aria-selected={r.id === selected} onClick={() => setSelected(r.id === selected ? null : r.id)}>
-                        <td><span className="d-ticket" style={{ fontSize: 15 }}>{r.displayNumber}</span></td>
+                        <td><span className="d-tk">{r.displayNumber}</span></td>
                         <td>{r.customerName}</td>
                         <td>{r.paxCount}</td>
                         <td><span className={r.source === 'ZALO' ? 'r4-sc r4-sc-n' : 'r4-sc r4-sc-m'}>{r.source === 'ZALO' ? m.sourceZalo : m.sourceCounter}</span></td>
@@ -242,7 +242,7 @@ function Detail({ row, onClose, onAct }: { row: HistRow; onClose: () => void; on
   return (
     <aside className="r4-drawer" data-testid="history-detail" aria-label={row.displayNumber}>
       <div className="r4-row" style={{ alignItems: 'flex-start' }}>
-        <span className="d-ticket" style={{ fontSize: 26 }}>{row.displayNumber}</span>
+        <span className="d-tk" style={{ fontSize: 26, padding: '6px 14px', borderRadius: 14 }}>{row.displayNumber}</span>
         <div className="r4-sp">
           <b style={{ font: '700 18px var(--d-font-display)' }}>{row.customerName}</b>
           <div className="d-muted" style={{ fontSize: 13 }}>{[row.phoneMasked, `${row.paxCount} khách`, `Bàn ${row.bucketPrefix}`].filter(Boolean).join(' · ')}</div>
