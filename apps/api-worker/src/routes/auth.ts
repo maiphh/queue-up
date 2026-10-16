@@ -2,7 +2,13 @@ import { Hono } from 'hono';
 import type { Env } from '../index';
 import { signGuestJwt, signStaffJwt, verifyPassword, type StaffRole } from '../services/jwt';
 import { resolveActor } from '../services/actor';
-import { fetchZaloProfile, upsertGuestUser } from '../services/zalo-auth';
+import {
+  fetchZaloProfile,
+  sanitizeAvatarUrl,
+  sanitizeDisplayName,
+  upsertGuestUser,
+  type ZaloProfile,
+} from '../services/zalo-auth';
 
 const auth = new Hono<{ Bindings: Env }>();
 
@@ -18,7 +24,7 @@ auth.post('/zalo', async (c) => {
   if (!c.env.ZALO_APP_SECRET || !c.env.JWT_SECRET) {
     return c.json(apiError('Auth not configured', 'AUTH_NOT_CONFIGURED'), 500);
   }
-  let body: { accessToken?: unknown };
+  let body: { accessToken?: unknown; displayName?: unknown; avatarUrl?: unknown };
   try {
     body = await c.req.json();
   } catch {
@@ -50,17 +56,27 @@ auth.post('/zalo', async (c) => {
       401,
     );
   }
-  const profile = result.profile;
+  const graph = result.profile;
 
-  const guestId = await upsertGuestUser(c.env.DB, profile);
+  // The Mini App can read name/avatar inside Zalo and sends them as a label.
+  // Graph data wins; a client value only fills a field the graph withheld.
+  const name = graph.name ?? sanitizeDisplayName(body.displayName) ?? undefined;
+  const avatarUrl = graph.avatarUrl ?? sanitizeAvatarUrl(body.avatarUrl) ?? undefined;
+  const profile: ZaloProfile = {
+    id: graph.id,
+    ...(name ? { name } : {}),
+    ...(avatarUrl ? { avatarUrl } : {}),
+  };
+
+  const guest = await upsertGuestUser(c.env.DB, profile);
   const token = await signGuestJwt(c.env.JWT_SECRET, {
-    sub: guestId,
-    zid: profile.id,
-    ...(profile.name ? { name: profile.name } : {}),
+    sub: guest.id,
+    zid: graph.id,
+    ...(guest.displayName ? { name: guest.displayName } : {}),
   });
   return c.json({
     token,
-    guest: { id: guestId, name: profile.name ?? null, avatarUrl: profile.avatarUrl ?? null },
+    guest: { id: guest.id, name: guest.displayName, avatarUrl: guest.avatarUrl },
   });
 });
 
@@ -89,13 +105,13 @@ auth.post('/dev', async (c) => {
       ? body.name.trim().slice(0, 64)
       : raw || 'Dev Guest';
   const profile = { id: `dev:${devId}`, name };
-  const guestId = await upsertGuestUser(c.env.DB, profile);
+  const guest = await upsertGuestUser(c.env.DB, profile);
   const token = await signGuestJwt(c.env.JWT_SECRET, {
-    sub: guestId,
+    sub: guest.id,
     zid: profile.id,
     name: profile.name,
   });
-  return c.json({ token, guest: { id: guestId, name: profile.name, avatarUrl: null } });
+  return c.json({ token, guest: { id: guest.id, name: profile.name, avatarUrl: null } });
 });
 
 type StaffRow = { id: string; email: string; role: string; client_id: string | null; branch_id: string | null; password_hash: string };

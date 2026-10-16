@@ -8,6 +8,7 @@ import {
   client,
   host,
   manage,
+  me,
   superAdmin,
   tickets,
   webhooks,
@@ -68,6 +69,7 @@ app.use('*', async (c, next) => {
 app.get('/health', (c) => c.json({ ok: true, service: 'luotdi-api' }));
 
 app.route('/api/auth', auth);
+app.route('/api/me', me);
 app.route('/api/tickets', tickets);
 app.route('/api/host', host);
 app.route('/api/branches', branches);
