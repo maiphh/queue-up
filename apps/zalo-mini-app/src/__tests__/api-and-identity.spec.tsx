@@ -3,12 +3,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const zmp = vi.hoisted(() => ({
   getAccessToken: vi.fn<() => Promise<string>>(),
+  getUserInfo: vi.fn<() => Promise<{ userInfo: { id?: string; name?: string; avatar?: string; idByOA?: string } }>>(),
   getRouteParams: vi.fn<() => Record<string, string>>(() => ({})),
   store: new Map<string, string>(),
 }));
 
 vi.mock('zmp-sdk', () => ({
   getAccessToken: zmp.getAccessToken,
+  getUserInfo: zmp.getUserInfo,
   getRouteParams: zmp.getRouteParams,
   nativeStorage: {
     getItem: (k: string) => zmp.store.get(k) ?? '',
@@ -63,6 +65,8 @@ describe('useZaloIdentity', () => {
   beforeEach(() => {
     zmp.store.clear();
     setSessionToken(null);
+    zmp.getAccessToken.mockReset();
+    zmp.getUserInfo.mockReset();
     // Pretend to be inside Zalo so the real token exchange path runs.
     vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 Zalo/24.1');
   });
@@ -85,6 +89,70 @@ describe('useZaloIdentity', () => {
     expect(JSON.parse(String(init.body))).toEqual({ accessToken: 'zalo-at' });
     expect(getSessionToken()).toBe('a.eyJleHAiOjk5OTk5OTk5OTl9.c');
     expect(setItem).not.toHaveBeenCalled();
+  });
+
+  it('keeps the exchange body to { accessToken } when getUserInfo rejects', async () => {
+    zmp.getAccessToken.mockResolvedValue('zalo-at');
+    zmp.getUserInfo.mockRejectedValue(new Error('-1401 permission denied'));
+    const f = vi.fn(async () =>
+      Response.json({ token: 'a.eyJleHAiOjk5OTk5OTk5OTl9.c', guest: { name: 'Khách' } }),
+    );
+    vi.stubGlobal('fetch', f);
+
+    const { result } = renderHook(() => useZaloIdentity());
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(result.current.customerName).toBe('Khách');
+    expect(f).toHaveBeenCalledTimes(1);
+    const [url, init] = f.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toMatch(/\/api\/auth\/zalo$/);
+    expect(JSON.parse(String(init.body))).toEqual({ accessToken: 'zalo-at' });
+    expect(zmp.getUserInfo).toHaveBeenCalledTimes(1);
+  });
+
+  it('posts the getUserInfo label to /api/me/display and adopts the stored name', async () => {
+    zmp.getAccessToken.mockResolvedValue('zalo-at');
+    zmp.getUserInfo.mockResolvedValue({
+      userInfo: { id: 'spoof', name: 'Lan', avatar: 'https://cdn.example/a.png' },
+    });
+    const f = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/api/me/display')) {
+        return Response.json({ name: 'Lan', avatarUrl: 'https://cdn.example/a.png' });
+      }
+      return Response.json({ token: 'a.eyJleHAiOjk5OTk5OTk5OTl9.c', guest: { name: 'Khách' } });
+    });
+    vi.stubGlobal('fetch', f);
+
+    const { result } = renderHook(() => useZaloIdentity());
+    await waitFor(() => expect(result.current.customerName).toBe('Lan'));
+
+    const meCall = f.mock.calls.find(([u]) => String(u).includes('/api/me/display'));
+    expect(meCall).toBeTruthy();
+    const init = (meCall as unknown as [unknown, RequestInit])[1];
+    expect((init.headers as Record<string, string>).Authorization).toBe(
+      'Bearer a.eyJleHAiOjk5OTk5OTk5OTl9.c',
+    );
+    const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+    expect(body).toEqual({ displayName: 'Lan', avatarUrl: 'https://cdn.example/a.png' });
+    expect(String(init.body)).not.toContain('spoof');
+  });
+
+  it('enriches a cached-JWT session without a fresh token exchange', async () => {
+    const cached = `a.${btoa(JSON.stringify({ exp: 9_999_999_999 }))}.c`;
+    zmp.store.set('luotdi.session', cached);
+    zmp.getUserInfo.mockResolvedValue({
+      userInfo: { id: 'spoof', name: 'Lan', avatar: 'https://cdn.example/a.png' },
+    });
+    const f = vi.fn(async () => Response.json({ name: 'Lan', avatarUrl: 'https://cdn.example/a.png' }));
+    vi.stubGlobal('fetch', f);
+
+    const { result } = renderHook(() => useZaloIdentity());
+    await waitFor(() => expect(result.current.customerName).toBe('Lan'));
+    expect(zmp.getAccessToken).not.toHaveBeenCalled();
+    expect(String((f.mock.calls[0] as unknown as [string])[0])).toMatch(/\/api\/me\/display$/);
   });
 
   it('reports error (not a silent hang) when the Worker rejects the token', async () => {
@@ -122,6 +190,7 @@ describe('useZaloIdentity dev bypass (browser, outside Zalo)', () => {
     zmp.store.clear();
     setSessionToken(null);
     zmp.getAccessToken.mockReset();
+    zmp.getUserInfo.mockReset();
   });
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -143,6 +212,7 @@ describe('useZaloIdentity dev bypass (browser, outside Zalo)', () => {
     expect(url).toMatch(/\/api\/auth\/dev$/);
     expect(JSON.parse(String(init.body))).toEqual({});
     expect(zmp.getAccessToken).not.toHaveBeenCalled();
+    expect(zmp.getUserInfo).not.toHaveBeenCalled();
   });
 
   it('?as=<name> picks the test guest', async () => {

@@ -9,6 +9,36 @@ export const ZALO_GRAPH_ME_URL = 'https://graph.zalo.me/v2.0/me?fields=id';
 
 export type ZaloProfile = { id: string; name?: string; avatarUrl?: string };
 
+/** Stored guest identity returned by {@link upsertGuestUser}. */
+export type GuestUserRecord = {
+  id: string;
+  displayName: string | null;
+  avatarUrl: string | null;
+};
+
+/**
+ * Client-supplied label (from the Mini App `getUserInfo()`). Trim, collapse
+ * whitespace, cap at 64; null when nothing remains so a blank name is omitted.
+ */
+export function sanitizeDisplayName(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const value = raw.trim().replace(/\s+/g, ' ');
+  if (!value) return null;
+  return value.slice(0, 64);
+}
+
+/** Only `https://` URLs are accepted, capped at 500 chars; anything else → null. */
+export function sanitizeAvatarUrl(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const value = raw.trim();
+  if (!value || value.length > 500) return null;
+  try {
+    return new URL(value).protocol === 'https:' ? value : null;
+  } catch {
+    return null;
+  }
+}
+
 export type ZaloProfileResult =
   | { ok: true; profile: ZaloProfile }
   | { ok: false; zaloError: number | null; zaloMessage: string };
@@ -78,12 +108,12 @@ export async function fetchZaloProfile(
   };
 }
 
-/** Upsert by zalo_user_id; returns guest_users.id. */
+/** Upsert by zalo_user_id; returns the stored guest identity. */
 export async function upsertGuestUser(
   db: D1Database,
   profile: ZaloProfile,
   nowMs = Date.now(),
-): Promise<string> {
+): Promise<GuestUserRecord> {
   const row = await db
     .prepare(
       `INSERT INTO guest_users (id, zalo_user_id, display_name, avatar_url, created_at, last_interaction_at)
@@ -93,7 +123,7 @@ export async function upsertGuestUser(
          avatar_url = COALESCE(excluded.avatar_url, guest_users.avatar_url),
          last_interaction_at = excluded.last_interaction_at,
          deleted_at = NULL
-       RETURNING id`,
+       RETURNING id, display_name, avatar_url`,
     )
     .bind(
       crypto.randomUUID(),
@@ -102,7 +132,7 @@ export async function upsertGuestUser(
       profile.avatarUrl ?? null,
       nowMs,
     )
-    .first<{ id: string }>();
+    .first<{ id: string; display_name: string | null; avatar_url: string | null }>();
   if (!row) throw new Error('guest upsert failed');
-  return row.id;
+  return { id: row.id, displayName: row.display_name, avatarUrl: row.avatar_url };
 }

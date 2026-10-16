@@ -3,13 +3,18 @@
  * The JWT is kept in memory (and zmp native storage) and sent as a Bearer
  * header by `apiFetch`. No localStorage / client-chosen user ids.
  *
+ * Inside Zalo we also best-effort read the display name/avatar with
+ * `getUserInfo()` and POST them to /api/me/display as a label — Cloudflare
+ * egress is outside Vietnam, so graph.zalo.me withholds those fields. That
+ * step has its own timeout and can never fail sign-in.
+ *
  * Browser dev (`pnpm dev`, outside Zalo): falls back to POST /api/auth/dev,
  * automatically (DEV or VITE_SKIP_ZALO_AUTH=1, and not inside Zalo); `?as=<name>`
  * picks a test guest. The Worker only serves that route when ENVIRONMENT=dev.
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { getAccessToken, nativeStorage } from 'zmp-sdk';
+import { getAccessToken, getUserInfo, nativeStorage } from 'zmp-sdk';
 import { apiFetch, setSessionToken } from '../lib/api';
 
 export type ZaloIdentityStatus = 'loading' | 'ready' | 'error';
@@ -25,6 +30,8 @@ export type ZaloIdentity = {
 const TOKEN_KEY = 'luotdi.session';
 /** One overall budget for the whole sign-in (SDK + Worker exchange). */
 export const IDENTITY_TIMEOUT_MS = 10_000;
+/** Separate budget for the best-effort `getUserInfo()` permission dialog. */
+export const PROFILE_TIMEOUT_MS = 12_000;
 
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -130,6 +137,41 @@ export function signIn(timeoutMs = IDENTITY_TIMEOUT_MS): Promise<AuthResponse> {
   return withTimeout(signInSteps(), timeoutMs);
 }
 
+type DisplayProfile = { displayName: string | null; avatarUrl: string | null };
+
+/**
+ * Read name + avatar from Zalo's `getUserInfo()` only. Its `id` / `idByOA` are
+ * ignored: the account id is the graph `id` proven by the Worker. Returns null
+ * outside Zalo (dev bypass) or when there is nothing usable.
+ */
+async function readZaloDisplayProfile(): Promise<DisplayProfile | null> {
+  if (!isInsideZalo()) return null;
+  const { userInfo } = await getUserInfo({ autoRequestPermission: true });
+  const name =
+    typeof userInfo?.name === 'string' && userInfo.name.trim() ? userInfo.name.trim() : null;
+  const avatar =
+    typeof userInfo?.avatar === 'string' && /^https:\/\//i.test(userInfo.avatar)
+      ? userInfo.avatar
+      : null;
+  if (!name && !avatar) return null;
+  return { displayName: name, avatarUrl: avatar };
+}
+
+/** POST the label; returns the stored name when the Worker accepted it. */
+async function pushDisplayProfile(profile: DisplayProfile): Promise<string | null> {
+  const body: { displayName?: string; avatarUrl?: string } = {};
+  if (profile.displayName) body.displayName = profile.displayName;
+  if (profile.avatarUrl) body.avatarUrl = profile.avatarUrl;
+  const res = await apiFetch('/api/me/display', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) return null;
+  const data = (await res.json().catch(() => null)) as { name?: unknown } | null;
+  return typeof data?.name === 'string' && data.name ? data.name : null;
+}
+
 export function useZaloIdentity(): ZaloIdentity {
   const [state, setState] = useState<{
     status: ZaloIdentityStatus;
@@ -144,11 +186,27 @@ export function useZaloIdentity(): ZaloIdentity {
     let cancelled = false;
     setState((s) => ({ ...s, status: 'loading', error: null }));
 
+    // Best-effort: never throws into sign-in, never wipes a known name.
+    const enrich = async () => {
+      try {
+        const profile = await withTimeout(readZaloDisplayProfile(), PROFILE_TIMEOUT_MS);
+        if (cancelled || !profile) return;
+        const stored = await withTimeout(pushDisplayProfile(profile), PROFILE_TIMEOUT_MS);
+        if (cancelled || !stored) return;
+        setState((s) => (s.status === 'ready' ? { ...s, customerName: stored } : s));
+      } catch {
+        /* denied (-1401), timeout, transport error: keep the known name */
+      }
+    };
+
     const cached = attempt === 0 ? readCachedToken() : null;
     if (cached) {
       setSessionToken(cached);
       setState({ status: 'ready', customerName: 'Khách', error: null });
-      return;
+      void enrich();
+      return () => {
+        cancelled = true;
+      };
     }
 
     void signIn()
@@ -157,6 +215,7 @@ export function useZaloIdentity(): ZaloIdentity {
         setSessionToken(token);
         cacheToken(token);
         setState({ status: 'ready', customerName: guest.name ?? 'Khách', error: null });
+        void enrich();
       })
       .catch((err: unknown) => {
         if (cancelled) return;

@@ -106,6 +106,168 @@ describe('POST /api/auth/zalo', () => {
     expect(headers.access_token).toBe('tok');
     expect(headers.appsecret_proof).toBe(await hmacSha256Hex('secret', 'tok'));
   });
+
+  it('stores the client display name/avatar when the graph withholds personal fields (-501)', async () => {
+    const realFetch = globalThis.fetch;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      if (String(input) === ZALO_GRAPH_ME_URL) {
+        return Response.json({
+          id: 'z-vn',
+          error: -501,
+          message: 'Personal information is limited due to IP address not inside Vietnam',
+        });
+      }
+      return realFetch(input, init);
+    });
+
+    const res = await SELF.fetch('http://localhost/api/auth/zalo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        accessToken: 'tok-vn',
+        displayName: 'Lan',
+        avatarUrl: 'https://cdn.example/a.png',
+      }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      token: string;
+      guest: { id: string; name: string | null; avatarUrl: string | null };
+    };
+    const claims = await verifyGuestJwt(env.JWT_SECRET, body.token);
+    expect(claims).toMatchObject({ zid: 'z-vn', sub: body.guest.id });
+    expect(body.guest.name).toBe('Lan');
+    expect(body.guest.avatarUrl).toBe('https://cdn.example/a.png');
+
+    const row = await env.DB.prepare(
+      'SELECT display_name, avatar_url FROM guest_users WHERE zalo_user_id = ?',
+    )
+      .bind('z-vn')
+      .first<{ display_name: string; avatar_url: string }>();
+    expect(row).toEqual({ display_name: 'Lan', avatar_url: 'https://cdn.example/a.png' });
+    expect(ZALO_GRAPH_ME_URL).not.toContain('name');
+  });
+
+  it('keeps the graph name when the client also sends a displayName', async () => {
+    const realFetch = globalThis.fetch;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) =>
+      String(input) === ZALO_GRAPH_ME_URL
+        ? Response.json({ id: 'z-graph', name: 'Lan' })
+        : realFetch(input, init),
+    );
+    const res = await SELF.fetch('http://localhost/api/auth/zalo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accessToken: 'tok', displayName: 'Other' }),
+    });
+    expect(res.status).toBe(200);
+    const row = await env.DB.prepare(
+      'SELECT display_name FROM guest_users WHERE zalo_user_id = ?',
+    )
+      .bind('z-graph')
+      .first<{ display_name: string }>();
+    expect(row?.display_name).toBe('Lan');
+  });
+});
+
+describe('POST /api/me/display', () => {
+  beforeAll(async () => {
+    await applySchema(env.DB, env.TEST_SCHEMA_SQL).catch(() => undefined);
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  async function seedGuest(id: string, zid: string): Promise<void> {
+    await env.DB.prepare(
+      'INSERT OR REPLACE INTO guest_users (id, zalo_user_id, created_at) VALUES (?, ?, ?)',
+    )
+      .bind(id, zid, Date.now())
+      .run();
+  }
+
+  function guestToken(sub: string, zid: string): Promise<string> {
+    return signGuestJwt(env.JWT_SECRET, { sub, zid });
+  }
+
+  it('updates only the JWT guest and rejects a non-https avatar', async () => {
+    await seedGuest('g-own', 'z-own');
+    await seedGuest('g-other', 'z-other');
+    const token = await guestToken('g-own', 'z-own');
+
+    const res = await SELF.fetch('http://localhost/api/me/display', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      // A body guest id is not a field the route understands: ignored.
+      body: JSON.stringify({
+        displayName: '  Lan   Nguyễn  ',
+        avatarUrl: 'javascript:alert(1)',
+        guestId: 'g-other',
+      }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ name: 'Lan Nguyễn', avatarUrl: null });
+
+    const own = await env.DB.prepare(
+      'SELECT display_name, avatar_url FROM guest_users WHERE id = ?',
+    )
+      .bind('g-own')
+      .first<{ display_name: string | null; avatar_url: string | null }>();
+    expect(own).toEqual({ display_name: 'Lan Nguyễn', avatar_url: null });
+
+    const other = await env.DB.prepare('SELECT display_name FROM guest_users WHERE id = ?')
+      .bind('g-other')
+      .first<{ display_name: string | null }>();
+    expect(other?.display_name).toBeNull();
+  });
+
+  it('stores a valid https avatar and never wipes a field that was omitted', async () => {
+    await seedGuest('g-http', 'z-http');
+    const token = await guestToken('g-http', 'z-http');
+
+    const first = await SELF.fetch('http://localhost/api/me/display', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ displayName: 'Lan', avatarUrl: 'http://insecure.example/a.png' }),
+    });
+    expect(first.status).toBe(200);
+    expect(await first.json()).toEqual({ name: 'Lan', avatarUrl: null });
+
+    const second = await SELF.fetch('http://localhost/api/me/display', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ avatarUrl: 'https://cdn.example/b.png' }),
+    });
+    expect(second.status).toBe(200);
+    // displayName omitted → kept; avatar updated.
+    expect(await second.json()).toEqual({ name: 'Lan', avatarUrl: 'https://cdn.example/b.png' });
+  });
+
+  it('rejects a missing JWT (401) and a non-JSON body (400)', async () => {
+    const noAuth = await SELF.fetch('http://localhost/api/me/display', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ displayName: 'X' }),
+    });
+    expect(noAuth.status).toBe(401);
+
+    await seedGuest('g-bad-body', 'z-bad-body');
+    const token = await guestToken('g-bad-body', 'z-bad-body');
+    const badBody = await SELF.fetch('http://localhost/api/me/display', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: 'not json',
+    });
+    expect(badBody.status).toBe(400);
+  });
+
+  it('returns 404 when the guest row is gone', async () => {
+    const token = await guestToken('g-missing', 'z-missing');
+    const res = await SELF.fetch('http://localhost/api/me/display', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ displayName: 'Ghost' }),
+    });
+    expect(res.status).toBe(404);
+  });
 });
 
 describe('ZaloZnsSender', () => {
